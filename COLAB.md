@@ -17,6 +17,9 @@ interpreter under `.runtime/python_path`. It deliberately does not replace
 PyTorch or the CUDA runtime. This also avoids relying on `ensurepip`, which is
 not functional in every Colab runtime image.
 
+The project supports Python 3.10 through 3.13 so it works with both current
+and recent Colab runtime images.
+
 Run checks and experiments one at a time:
 
 ```python
