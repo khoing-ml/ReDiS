@@ -87,34 +87,41 @@ for (block_family, layer_id), tensors in controller.activations.items():
         )
         metrics["invocation"] = invocation
         report["sites"][site].append(metrics)
-        for view_key in (
-            "full_hidden_spectrum",
-            "token_pooled_spectrum",
-            "projected_spectrum",
-            "spatial_low_frequency_spectrum",
-        ):
-            spectrum = metrics.get(view_key)
-            if spectrum is None:
+        for view_name, view_metrics in metrics["views"].items():
+            if view_metrics is None:
                 continue
+            raw_spectrum = view_metrics["raw_spectrum"]
+            normalized_spectrum = view_metrics["row_normalized_spectrum"]
             summary.append(
                 {
                     "site": site,
                     "timestep_id": invocation,
-                    "view": view_key,
-                    "effective_rank": spectrum["effective_rank"],
-                    "normalized_effective_rank": spectrum[
+                    "view": view_name,
+                    "raw_effective_rank": raw_spectrum["effective_rank"],
+                    "raw_normalized_effective_rank": raw_spectrum[
                         "normalized_effective_rank"
                     ],
-                    "stable_rank": spectrum["stable_rank"],
-                    "top1_ratio": spectrum["top1_ratio"],
-                    "residual_rms": metrics["residual_rms"]["global"],
+                    "raw_top1_ratio": raw_spectrum["top1_ratio"],
+                    "row_normalized_effective_rank": normalized_spectrum[
+                        "effective_rank"
+                    ],
+                    "row_normalized_normalized_effective_rank": (
+                        normalized_spectrum["normalized_effective_rank"]
+                    ),
+                    "row_normalized_top1_ratio": normalized_spectrum[
+                        "top1_ratio"
+                    ],
+                    "view_rms": view_metrics["view_rms"],
+                    "view_energy_over_full_residual": view_metrics[
+                        "energy_over_full_residual"
+                    ],
                 }
             )
 
 (run_dir / "spectra.json").write_text(json.dumps(report, indent=2) + "\n")
 (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 most_concentrated = sorted(
-    summary, key=lambda row: float(row["normalized_effective_rank"])
+    summary, key=lambda row: float(row["raw_normalized_effective_rank"])
 )[:12]
 print(json.dumps({"most_concentrated": most_concentrated}, indent=2))
 print(run_dir)

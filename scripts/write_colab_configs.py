@@ -70,6 +70,47 @@ def make_config(
     }
 
 
+def make_screening_config() -> dict[str, object]:
+    config = make_config(list(range(8)))
+    config["generation"]["prompt"] = "Decisive screening uses screening.prompt_manifest"
+    config["intervention"].update(
+        {"gamma": 1.0, "sigma": 1.0, "rms_match": False}
+    )
+    config["screening"] = {
+        "prompt_manifest": "configs/prompts_screening_8.yaml",
+        "target_relative_norms": [0.005, 0.010, 0.020],
+        "methods": [
+            "identity",
+            "gaussian_noise",
+            "residual_amplification",
+            "full_hidden_isotropization",
+            "low_frequency_isotropization",
+            "token_pooled_isotropization",
+        ],
+        "sites": {
+            "A": {
+                "view": "spatial_low_frequency",
+                "family": "single_transformer_blocks",
+                "layer_id": 19,
+                "timestep_id": 0,
+            },
+            "B": {
+                "view": "spatial_low_frequency",
+                "family": "single_transformer_blocks",
+                "layer_id": 4,
+                "timestep_id": 2,
+            },
+            "C": {
+                "view": "token_pooled",
+                "family": "single_transformer_blocks",
+                "layer_id": 14,
+                "timestep_id": 3,
+            },
+        },
+    }
+    return config
+
+
 output_dir = Path(".runtime")
 output_dir.mkdir(exist_ok=True)
 diagnosis_group_size = 16 if vram_gib >= 30 and ram_gib >= 40 else 8
@@ -83,6 +124,7 @@ configs = {
         list(range(diagnosis_group_size)), capture_sites=diagnosis_sites
     ),
     "colab_intervention.yaml": make_config([0, 1, 2, 3]),
+    "colab_screening.yaml": make_screening_config(),
 }
 for filename, config in configs.items():
     (output_dir / filename).write_text(

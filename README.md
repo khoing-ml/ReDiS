@@ -27,6 +27,9 @@ bash bash/07_test_residual_amplification.sh
 bash bash/08_test_projected_amplification.sh
 bash bash/09_test_gram_isotropization.sh
 bash bash/10_evaluate_feature_diversity.sh outputs/METHOD/RUN_TIMESTAMP
+bash bash/11_run_screening_site.sh A .runtime/colab_screening.yaml
+bash bash/12_setup_output_metrics.sh
+bash bash/13_evaluate_screening.sh outputs/screening_site_A/RUN_TIMESTAMP
 ```
 
 `00` bootstraps `.venv` with Python 3.12. Set `REDIS_INSTALL_QUANT=0` to omit
@@ -40,6 +43,11 @@ Override the config with the first positional argument:
 ```bash
 bash bash/03_generate_baseline.sh configs/flux2_klein_4b_smoke.yaml
 ```
+
+The decisive screening is fixed to three sites (A/B/C), eight prompts, eight
+seeds, and per-seed correction norms 0.005/0.010/0.020. Run one site per
+process. Its evaluator reports output diversity (DINO, DreamSim, LPIPS) against
+fidelity (CLIP-T, HPSv2); hidden effective rank remains a mechanism diagnostic.
 
 Useful environment variables:
 

@@ -25,7 +25,7 @@ paths are unaffected.
 The project supports Python 3.10 through 3.13 so it works with both current
 and recent Colab runtime images.
 
-Run checks and experiments one at a time:
+Run checks and the row-normalized diagnostic one at a time:
 
 ```python
 !bash bash/02_check_model_access.sh .runtime/colab_baseline.yaml
@@ -38,24 +38,49 @@ Run checks and experiments one at a time:
 !bash bash/09_test_gram_isotropization.sh .runtime/colab_intervention.yaml
 ```
 
-The A100 diagnosis config uses B=16 and captures valid Klein 4B depths
-`transformer_blocks=[0,2,4]` and
-`single_transformer_blocks=[0,4,9,14,19]` at all four timesteps. Its
-`summary.json` ranks the most concentrated spectrum views.
+Each captured view now logs raw and per-seed row-normalized effective rank,
+view RMS, and view energy relative to the full residual. The low-frequency
+diagnostic and intervention use the same 2x2 average-and-lift operator.
 
-After choosing a contracted site, strength-match individual intervention runs
-by passing a target correction norm as the second argument:
+## Decisive screening
+
+Do not run another layer/rank/beta sweep. Run one fixed site at a time. Start
+with site A; B and C are follow-ups:
 
 ```python
-!bash bash/07_test_residual_amplification.sh .runtime/colab_intervention.yaml 0.02
-!bash bash/08_test_projected_amplification.sh .runtime/colab_intervention.yaml 0.02
-!bash bash/09_test_gram_isotropization.sh .runtime/colab_intervention.yaml 0.02
+!bash bash/11_run_screening_site.sh A
+# later, only if needed:
+!bash bash/11_run_screening_site.sh B
+!bash bash/11_run_screening_site.sh C
 ```
 
-Repeat with `0.05` and `0.10`. Do not interpret this sweep until the
-intervention config points to a site where diagnosis found contraction.
+The generated `.runtime/colab_screening.yaml` fixes eight prompts, eight seeds,
+`beta=0.5`, projection rank 256, projection seed 0, and target per-seed
+correction norms 0.005/0.010/0.020. Every invocation patches exactly one of:
 
-Evaluate DINO image diversity, CLIP image diversity, and CLIP prompt alignment
+- A: `single_transformer_blocks.19`, timestep 0
+- B: `single_transformer_blocks.4`, timestep 2
+- C: `single_transformer_blocks.14`, timestep 3
+
+It compares identity, Gaussian noise, residual amplification, full-hidden
+isotropization, low-frequency ReDiS, and token-pooled ReDiS. `rms_match` is off
+in this screening so it cannot introduce an extra full-hidden scaling term;
+the final correction itself is norm-matched independently for every seed.
+
+After generation, install the heavier evaluation-only packages and evaluate
+the returned run directory:
+
+```python
+!bash bash/12_setup_output_metrics.sh
+!bash bash/13_evaluate_screening.sh outputs/screening_site_A/RUN_TIMESTAMP
+```
+
+This writes per-prompt DINO, DreamSim, LPIPS, CLIP-T, and HPSv2 scores,
+condition-level deltas against identity, a CSV summary, and
+`dino_diversity_vs_fidelity.png`. HPSv2 is installed without its benchmark-only
+pytest/protobuf pins, so it does not downgrade the working experiment stack.
+
+For an older single-prompt run, evaluate DINO image diversity, CLIP image diversity, and CLIP prompt alignment
 for any output directory containing at least two seed images:
 
 ```python

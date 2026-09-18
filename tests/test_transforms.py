@@ -5,9 +5,12 @@ from redis.analysis import seed_spectrum
 from redis.methods import (
     gaussian_noise,
     gram_isotropize,
+    low_frequency_isotropize,
     make_random_basis,
+    match_relative_norm,
     projected_amplify,
     residual_amplify,
+    token_pooled_isotropize,
 )
 from redis.methods.transforms import (
     cap_relative_correction,
@@ -94,3 +97,23 @@ def test_correction_strength_matching_hits_target():
     assert float(achieved) == pytest.approx(0.05, rel=2e-5)
     assert scale > 0
     assert raw > 0
+
+
+def test_per_seed_correction_strength_matching_hits_target():
+    reference = torch.randn(4, 5, 8)
+    delta = torch.randn_like(reference) * torch.tensor([1.0, 2.0, 4.0, 8.0]).view(4, 1, 1)
+    matched = match_relative_norm(delta, reference, 0.01)
+    achieved = matched.flatten(1).norm(dim=1) / reference.flatten(1).norm(dim=1)
+    assert torch.allclose(achieved, torch.full_like(achieved, 0.01), rtol=1e-5)
+
+
+def test_view_specific_isotropization_shapes_and_broadcast():
+    hidden = torch.randn(4, 16, 8)
+    hidden[0] *= 3
+    q = make_random_basis(8, 4, device=torch.device("cpu"), seed=0)
+    low = low_frequency_isotropize(hidden, q, beta=0.5, gamma=1.0)
+    pooled = token_pooled_isotropize(hidden, q, beta=0.5, gamma=1.0)
+    assert low.shape == hidden.shape
+    assert pooled.shape == hidden.shape
+    pooled_delta = pooled - hidden
+    assert torch.allclose(pooled_delta[:, :1], pooled_delta[:, 1:2], atol=1e-6)

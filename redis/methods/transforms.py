@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 from redis.analysis import seed_spectrum
+from redis.views import centered_residual, low_frequency_residual, token_pooled_residual
 
 
 def _require_group(hidden: torch.Tensor) -> None:
@@ -63,26 +64,18 @@ def projected_amplify(hidden: torch.Tensor, basis: torch.Tensor, gamma: float) -
     return (values + gamma * correction).to(hidden.dtype)
 
 
-def gram_isotropize(
-    hidden: torch.Tensor,
+def _isotropize_residual_view(
+    view: torch.Tensor,
     basis: torch.Tensor,
     *,
     beta: float,
-    gamma: float,
     eps: float = 1e-8,
     relative_tolerance: float = 1e-6,
-    return_diagnostics: bool = False,
-) -> torch.Tensor | tuple[torch.Tensor, dict[str, object]]:
-    _require_group(hidden)
+) -> tuple[torch.Tensor, dict[str, object]]:
     if not 0 <= beta <= 1:
         raise ValueError("beta must be in [0, 1]")
-    if (beta == 0 or gamma == 0) and not return_diagnostics:
-        return hidden
-
-    values = hidden.float()
     q = basis.float()
-    residual = values - values.mean(dim=0, keepdim=True)
-    projected = residual @ q
+    projected = view.float() @ q
     flattened = projected.flatten(1)
     flattened = flattened - flattened.mean(dim=0, keepdim=True)
     gram = (flattened @ flattened.T) / flattened.shape[1]
@@ -103,7 +96,7 @@ def gram_isotropize(
         "energy_match": "global",
     }
     if int(active.sum()) < 2:
-        return (hidden, diagnostics) if return_diagnostics else hidden
+        return torch.zeros_like(view, dtype=torch.float32), diagnostics
 
     active_values = eigvals[active]
     reference = torch.exp(torch.log(active_values + eps).mean())
@@ -115,19 +108,124 @@ def gram_isotropize(
     isotropic = isotropic.reshape_as(projected)
     delta_y = isotropic - projected
     correction = delta_y @ q.T
-    modified = (values + gamma * correction).to(hidden.dtype)
-    projected_modified = projected + gamma * delta_y
     diagnostics.update(
-        projected_post_spectrum=seed_spectrum(
-            projected_modified.detach().float().cpu()
-        ),
+        projected_post_spectrum=seed_spectrum(isotropic.detach().float().cpu()),
         whitening_scale_min=scales[active].min().item(),
         whitening_scale_max=scales[active].max().item(),
         relative_delta_y_norm=(
             delta_y.norm() / projected.norm().clamp_min(eps)
         ).item(),
     )
+    return correction, diagnostics
+
+
+def _finish_isotropization(
+    hidden: torch.Tensor,
+    correction: torch.Tensor,
+    diagnostics: dict[str, object],
+    *,
+    gamma: float,
+    view: str,
+    return_diagnostics: bool,
+) -> torch.Tensor | tuple[torch.Tensor, dict[str, object]]:
+    modified = (hidden.float() + gamma * correction).to(hidden.dtype)
+    diagnostics["view"] = view
+    diagnostics["gamma_before_strength_match"] = gamma
     return (modified, diagnostics) if return_diagnostics else modified
+
+
+def gram_isotropize(
+    hidden: torch.Tensor,
+    basis: torch.Tensor,
+    *,
+    beta: float,
+    gamma: float,
+    eps: float = 1e-8,
+    relative_tolerance: float = 1e-6,
+    return_diagnostics: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, dict[str, object]]:
+    _require_group(hidden)
+    if (beta == 0 or gamma == 0) and not return_diagnostics:
+        return hidden
+    residual = centered_residual(hidden)
+    correction, diagnostics = _isotropize_residual_view(
+        residual,
+        basis,
+        beta=beta,
+        eps=eps,
+        relative_tolerance=relative_tolerance,
+    )
+    return _finish_isotropization(
+        hidden,
+        correction,
+        diagnostics,
+        gamma=gamma,
+        view="full_hidden",
+        return_diagnostics=return_diagnostics,
+    )
+
+
+def low_frequency_isotropize(
+    hidden: torch.Tensor,
+    basis: torch.Tensor,
+    *,
+    beta: float,
+    gamma: float,
+    eps: float = 1e-8,
+    relative_tolerance: float = 1e-6,
+    return_diagnostics: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, dict[str, object]]:
+    _require_group(hidden)
+    if (beta == 0 or gamma == 0) and not return_diagnostics:
+        return hidden
+    low_frequency = low_frequency_residual(centered_residual(hidden))
+    correction, diagnostics = _isotropize_residual_view(
+        low_frequency,
+        basis,
+        beta=beta,
+        eps=eps,
+        relative_tolerance=relative_tolerance,
+    )
+    return _finish_isotropization(
+        hidden,
+        correction,
+        diagnostics,
+        gamma=gamma,
+        view="spatial_low_frequency",
+        return_diagnostics=return_diagnostics,
+    )
+
+
+def token_pooled_isotropize(
+    hidden: torch.Tensor,
+    basis: torch.Tensor,
+    *,
+    beta: float,
+    gamma: float,
+    eps: float = 1e-8,
+    relative_tolerance: float = 1e-6,
+    return_diagnostics: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, dict[str, object]]:
+    _require_group(hidden)
+    if (beta == 0 or gamma == 0) and not return_diagnostics:
+        return hidden
+    pooled = token_pooled_residual(centered_residual(hidden))
+    pooled_correction, diagnostics = _isotropize_residual_view(
+        pooled,
+        basis,
+        beta=beta,
+        eps=eps,
+        relative_tolerance=relative_tolerance,
+    )
+    correction = pooled_correction.expand(-1, hidden.shape[1], -1)
+    return _finish_isotropization(
+        hidden,
+        correction,
+        diagnostics,
+        gamma=gamma,
+        view="token_pooled",
+        return_diagnostics=return_diagnostics,
+    )
 
 
 def rms_match(modified: torch.Tensor, reference: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
@@ -169,3 +267,23 @@ def match_relative_correction(
     scale = target / raw_ratio
     matched = reference.float() + correction * scale
     return matched.to(modified.dtype), float(scale), float(raw_ratio)
+
+
+def match_relative_norm(
+    delta: torch.Tensor,
+    hidden: torch.Tensor,
+    target: float,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Match ||delta_i|| / ||hidden_i|| independently for every seed."""
+    if target <= 0:
+        raise ValueError("target correction ratio must be positive")
+    if delta.shape != hidden.shape:
+        raise ValueError("delta and hidden must have identical shapes")
+    delta_float = delta.float()
+    hidden_float = hidden.float()
+    delta_norm = delta_float.flatten(1).norm(dim=1, keepdim=True)
+    hidden_norm = hidden_float.flatten(1).norm(dim=1, keepdim=True)
+    scale = target * hidden_norm / (delta_norm + eps)
+    scale = scale.view(hidden.shape[0], *([1] * (hidden.ndim - 1)))
+    return (delta_float * scale).to(delta.dtype)

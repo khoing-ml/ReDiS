@@ -89,7 +89,11 @@ def test_intervention_strength_match_and_logging():
     entry = controller.logs[0]
     assert entry["relative_correction_norm"] == pytest.approx(0.02, rel=2e-2)
     assert entry["parameters"]["target_relative_correction_norm"] == 0.02
+    assert entry["per_seed_relative_correction_norm"] == pytest.approx(
+        [0.02] * 4, rel=2e-2
+    )
     assert "full_hidden_pre_spectrum" in entry
+    assert "pre_views" in entry
     assert "residual_energy_ratio" in entry
 
 

@@ -17,6 +17,9 @@ METHODS = (
     "residual_amplification",
     "projected_amplification",
     "gram_isotropization",
+    "full_hidden_isotropization",
+    "low_frequency_isotropization",
+    "token_pooled_isotropization",
 )
 
 parser = argparse.ArgumentParser()
@@ -29,7 +32,7 @@ generation = config["generation"]
 seeds = [int(seed) for seed in generation["seeds"]]
 if len(seeds) < 2:
     raise SystemExit("ERROR: interventions require at least two seeds for one prompt")
-if args.method == "gram_isotropization" and len(seeds) < 4:
+if args.method.endswith("isotropization") and len(seeds) < 4:
     raise SystemExit("ERROR: Gram isotropization smoke test requires at least four seeds")
 
 run_dir = make_run_dir(args.method)
@@ -107,7 +110,7 @@ report = {
         "beta": controller.beta,
         "projection_seed": controller.projection_seed,
         "rms_match": controller.match_rms,
-        "energy_match": "global" if args.method == "gram_isotropization" else None,
+        "energy_match": "global" if args.method.endswith("isotropization") else None,
         "target_relative_correction_norm": controller.target_relative_correction_norm,
         "max_relative_correction_norm": controller.max_relative_correction_norm,
     },

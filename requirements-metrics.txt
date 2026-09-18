@@ -1,0 +1,10 @@
+# Optional evaluator dependencies. The metric packages themselves are installed
+# with --no-deps by bash/12 so pip cannot replace Colab's CUDA PyTorch build.
+open-clip-torch==3.3.0
+peft==0.21.0
+timm==1.0.29
+scipy==1.18.1
+matplotlib==3.10.6
+clint==0.5.1
+einops==0.8.2
+ftfy==6.3.1

@@ -6,19 +6,22 @@ from typing import Any
 import torch
 
 from .output_adapter import extract_hidden, replace_hidden
-from redis.analysis import residual_rms, seed_spectrum
+from redis.analysis import representation_diagnostics, residual_rms, seed_spectrum
 from redis.methods import (
     gaussian_noise,
     gram_isotropize,
+    low_frequency_isotropize,
     make_random_basis,
+    match_relative_norm,
     projected_amplify,
     residual_amplify,
+    token_pooled_isotropize,
 )
 from redis.methods.transforms import (
     cap_relative_correction,
-    match_relative_correction,
     rms_match,
 )
+from redis.views import centered_residual, low_frequency_residual, token_pooled_residual
 
 
 class IdentityController:
@@ -96,12 +99,11 @@ class InterventionController(IdentityController):
         rank = min(self.projection_rank, hidden.shape[-1])
         key = (family, layer_id, rank, hidden.device)
         if key not in self.bases:
-            family_offset = 0 if family == "transformer_blocks" else 100_000
             self.bases[key] = make_random_basis(
                 hidden.shape[-1],
                 rank,
                 device=hidden.device,
-                seed=self.projection_seed + family_offset + layer_id,
+                seed=self.projection_seed,
             )
         return self.bases[key]
 
@@ -135,8 +137,24 @@ class InterventionController(IdentityController):
             modified = gaussian_noise(hidden, self.sigma, generator=generator)
         elif self.method == "projected_amplification":
             modified = projected_amplify(hidden, self._basis(hidden, family, layer_id), self.gamma)
-        elif self.method == "gram_isotropization":
+        elif self.method in ("gram_isotropization", "full_hidden_isotropization"):
             modified, method_diagnostics = gram_isotropize(
+                hidden,
+                self._basis(hidden, family, layer_id),
+                beta=self.beta,
+                gamma=self.gamma,
+                return_diagnostics=True,
+            )
+        elif self.method == "low_frequency_isotropization":
+            modified, method_diagnostics = low_frequency_isotropize(
+                hidden,
+                self._basis(hidden, family, layer_id),
+                beta=self.beta,
+                gamma=self.gamma,
+                return_diagnostics=True,
+            )
+        elif self.method == "token_pooled_isotropization":
+            modified, method_diagnostics = token_pooled_isotropize(
                 hidden,
                 self._basis(hidden, family, layer_id),
                 beta=self.beta,
@@ -148,19 +166,25 @@ class InterventionController(IdentityController):
 
         if self.match_rms:
             modified = rms_match(modified, hidden)
-        strength_match_scale = None
+        raw_delta = modified.float() - hidden.float()
+        raw_delta_norm = raw_delta.flatten(1).norm(dim=1)
+        hidden_norm = hidden.float().flatten(1).norm(dim=1).clamp_min(1e-8)
+        raw_per_seed_relative_norm = raw_delta_norm / hidden_norm
         raw_relative_correction_norm = (
-            (modified.float() - hidden.float()).norm()
-            / hidden.float().norm().clamp_min(1e-8)
+            raw_delta.norm() / hidden.float().norm().clamp_min(1e-8)
         ).item()
+        strength_match_scale = None
         if self.target_relative_correction_norm is not None:
-            modified, strength_match_scale, raw_relative_correction_norm = (
-                match_relative_correction(
-                    modified,
-                    hidden,
-                    self.target_relative_correction_norm,
-                )
+            matched_delta = match_relative_norm(
+                raw_delta,
+                hidden,
+                self.target_relative_correction_norm,
             )
+            matched_norm = matched_delta.float().flatten(1).norm(dim=1)
+            strength_match_scale = (
+                matched_norm / raw_delta_norm.clamp_min(1e-8)
+            ).tolist()
+            modified = (hidden.float() + matched_delta.float()).to(hidden.dtype)
         # Cap last so the tensor actually returned by the wrapper obeys the limit.
         modified = cap_relative_correction(
             modified, hidden, self.max_relative_correction_norm
@@ -174,8 +198,34 @@ class InterventionController(IdentityController):
             (modified.float() - hidden.float()).norm()
             / hidden.float().norm().clamp_min(1e-8)
         ).item()
+        per_seed_relative_norm = (
+            (modified.float() - hidden.float()).flatten(1).norm(dim=1)
+            / hidden.float().flatten(1).norm(dim=1).clamp_min(1e-8)
+        ).tolist()
         pre_residual = residual_rms(hidden.detach().float().cpu())
         post_residual = residual_rms(modified.detach().float().cpu())
+        basis = self._basis(hidden, family, layer_id).detach().float().cpu()
+        hidden_cpu = hidden.detach().float().cpu()
+        modified_cpu = modified.detach().float().cpu()
+        pre_views = representation_diagnostics(hidden_cpu, projection_basis=basis)
+        post_views = representation_diagnostics(modified_cpu, projection_basis=basis)
+        if self.method.endswith("isotropization"):
+            pre_view = centered_residual(hidden_cpu)
+            post_view = centered_residual(modified_cpu)
+            if self.method == "low_frequency_isotropization":
+                pre_view = low_frequency_residual(pre_view)
+                post_view = low_frequency_residual(post_view)
+            elif self.method == "token_pooled_isotropization":
+                pre_view = token_pooled_residual(pre_view)
+                post_view = token_pooled_residual(post_view)
+            projected_pre = pre_view @ basis
+            projected_post = post_view @ basis
+            method_diagnostics["projected_pre_spectrum"] = seed_spectrum(projected_pre)
+            method_diagnostics["projected_post_spectrum"] = seed_spectrum(projected_post)
+            method_diagnostics["relative_delta_y_norm"] = (
+                (projected_post - projected_pre).norm()
+                / projected_pre.norm().clamp_min(1e-8)
+            ).item()
         parameters = {
             "gamma": self.gamma,
             "sigma": self.sigma,
@@ -183,7 +233,11 @@ class InterventionController(IdentityController):
             "beta": self.beta,
             "projection_seed": self.projection_seed,
             "rms_match": self.match_rms,
-            "energy_match": "global" if self.method == "gram_isotropization" else None,
+            "energy_match": (
+                "global"
+                if self.method.endswith("isotropization")
+                else None
+            ),
             "target_relative_correction_norm": self.target_relative_correction_norm,
             "max_relative_correction_norm": self.max_relative_correction_norm,
         }
@@ -194,7 +248,11 @@ class InterventionController(IdentityController):
             "method": self.method,
             "parameters": parameters,
             "raw_relative_correction_norm": raw_relative_correction_norm,
+            "raw_per_seed_relative_correction_norm": (
+                raw_per_seed_relative_norm.tolist()
+            ),
             "relative_correction_norm": relative_norm,
+            "per_seed_relative_correction_norm": per_seed_relative_norm,
             "strength_match_scale": strength_match_scale,
             "full_hidden_pre_spectrum": seed_spectrum(hidden.detach().float().cpu()),
             "full_hidden_post_spectrum": seed_spectrum(modified.detach().float().cpu()),
@@ -205,6 +263,8 @@ class InterventionController(IdentityController):
                 if pre_residual["global"] > 0
                 else None
             ),
+            "pre_views": pre_views["views"],
+            "post_views": post_views["views"],
             "fallback": fallback,
         }
         log_entry.update(method_diagnostics)

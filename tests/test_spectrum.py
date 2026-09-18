@@ -3,7 +3,11 @@ import math
 import pytest
 import torch
 
-from redis.analysis import representation_diagnostics, seed_spectrum
+from redis.analysis import (
+    representation_diagnostics,
+    row_normalized_seed_spectrum,
+    seed_spectrum,
+)
 
 
 def test_isotropic_seed_spectrum_has_full_centered_rank():
@@ -37,3 +41,20 @@ def test_representation_diagnostics_include_complementary_views():
     assert result["spatial_low_frequency_spectrum"] is not None
     assert result["projected_spectrum"]["effective_rank"] > 0
     assert len(result["residual_rms"]["per_seed"]) == 4
+    for view in result["views"].values():
+        assert "raw_spectrum" in view
+        assert "row_normalized_spectrum" in view
+        assert "view_rms" in view
+        assert "energy_over_full_residual" in view
+    assert result["views"]["full_hidden"]["energy_over_full_residual"] == pytest.approx(1)
+
+
+def test_row_normalization_removes_seed_norm_imbalance():
+    directions = torch.tensor(
+        [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]]
+    ).reshape(4, 1, 2)
+    imbalanced = directions * torch.tensor([20.0, 20.0, 1.0, 1.0]).reshape(4, 1, 1)
+    raw = seed_spectrum(imbalanced)
+    normalized = row_normalized_seed_spectrum(imbalanced)
+    assert raw["top1_ratio"] > 0.99
+    assert normalized["top1_ratio"] == pytest.approx(0.5, rel=1e-5)
