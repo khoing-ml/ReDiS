@@ -12,8 +12,10 @@ instead of assuming that Pro+ always receives an A100.
 !bash bash/00_setup_colab.sh
 ```
 
-The setup creates a virtual environment that can see Colab's preinstalled
-PyTorch. It deliberately does not replace PyTorch or the CUDA runtime.
+The setup installs into Colab's disposable Python runtime and records that
+interpreter under `.runtime/python_path`. It deliberately does not replace
+PyTorch or the CUDA runtime. This also avoids relying on `ensurepip`, which is
+not functional in every Colab runtime image.
 
 Run checks and experiments one at a time:
 
