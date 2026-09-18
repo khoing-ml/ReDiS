@@ -1,0 +1,12 @@
+# Colab already provides a CUDA-compatible torch build. Do not add torch here:
+# replacing it downloads several GB and can mismatch the runtime driver.
+accelerate==1.15.0
+bitsandbytes==0.50.2
+diffusers @ git+https://github.com/huggingface/diffusers.git@a3e0b8ec235c27a6c17a21976daf7fd32d819d05
+huggingface-hub==1.32.0
+Pillow==12.3.0
+psutil==7.2.2
+pytest==9.1.1
+PyYAML==6.0.3
+safetensors==0.8.0
+transformers==5.17.0

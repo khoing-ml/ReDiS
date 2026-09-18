@@ -1,0 +1,36 @@
+model:
+  id: black-forest-labs/FLUX.2-klein-4B
+  revision: e7b7dc27f91deacad38e78976d1f2b499d76a294
+  dtype: bfloat16
+  memory_mode: auto
+  quantization: bitsandbytes_4bit
+  offload_dir: .offload/flux2-klein-4b
+  local_files_only: false
+  max_gpu_memory: 5GiB
+  max_cpu_memory: 5GiB
+
+generation:
+  prompt: "A red ceramic teapot on a wooden table, soft studio light"
+  seeds: [0, 1, 2, 3]
+  height: 256
+  width: 256
+  num_inference_steps: 4
+  guidance_scale: 1.0
+  max_sequence_length: 128
+
+capture:
+  block_family: transformer_blocks
+  layer_ids: [0]
+
+intervention:
+  timestep_ids: [0]
+  gamma: 0.3
+  sigma: 0.1
+  beta: 0.5
+  rms_match: true
+  max_relative_correction_norm: 0.25
+
+projection:
+  rank: 64
+  seed: 0
+
