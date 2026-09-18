@@ -37,7 +37,11 @@ if memory_mode == "auto":
     model["max_cpu_memory"] = f"{max(5, int(ram_gib) - 6)}GiB"
 
 
-def make_config(seeds: list[int]) -> dict[str, object]:
+def make_config(
+    seeds: list[int],
+    *,
+    capture_sites: dict[str, list[int]] | None = None,
+) -> dict[str, object]:
     return {
         "model": dict(model),
         "generation": {
@@ -50,11 +54,11 @@ def make_config(seeds: list[int]) -> dict[str, object]:
             "max_sequence_length": 128,
         },
         "capture": {
-            "block_family": "transformer_blocks",
-            "layer_ids": [0],
+            "sites": capture_sites or {"transformer_blocks": [0]},
             "clone_to_cpu": True,
         },
         "intervention": {
+            "sites": {"transformer_blocks": [0]},
             "timestep_ids": [0],
             "gamma": 0.3,
             "sigma": 0.1,
@@ -62,15 +66,22 @@ def make_config(seeds: list[int]) -> dict[str, object]:
             "rms_match": True,
             "max_relative_correction_norm": 0.25,
         },
-        "projection": {"rank": 64, "seed": 0},
+        "projection": {"rank": 256, "seed": 0},
     }
 
 
 output_dir = Path(".runtime")
 output_dir.mkdir(exist_ok=True)
+diagnosis_group_size = 16 if vram_gib >= 30 and ram_gib >= 40 else 8
+diagnosis_sites = {
+    "transformer_blocks": [0, 2, 4],
+    "single_transformer_blocks": [0, 4, 9, 14, 19],
+}
 configs = {
     "colab_baseline.yaml": make_config([0]),
-    "colab_capture.yaml": make_config([0, 1]),
+    "colab_capture.yaml": make_config(
+        list(range(diagnosis_group_size)), capture_sites=diagnosis_sites
+    ),
     "colab_intervention.yaml": make_config([0, 1, 2, 3]),
 }
 for filename, config in configs.items():
@@ -86,6 +97,8 @@ report = {
     "dtype": dtype,
     "profile": profile,
     "resolution": resolution,
+    "diagnosis_group_size": diagnosis_group_size,
+    "diagnosis_sites": diagnosis_sites,
     "configs": [str(output_dir / name) for name in configs],
 }
 (output_dir / "colab_hardware.json").write_text(

@@ -26,6 +26,7 @@ bash bash/06_test_gaussian_noise.sh
 bash bash/07_test_residual_amplification.sh
 bash bash/08_test_projected_amplification.sh
 bash bash/09_test_gram_isotropization.sh
+bash bash/10_evaluate_feature_diversity.sh outputs/METHOD/RUN_TIMESTAMP
 ```
 
 `00` bootstraps `.venv` with Python 3.12. Set `REDIS_INSTALL_QUANT=0` to omit

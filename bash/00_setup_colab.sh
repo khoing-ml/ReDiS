@@ -17,6 +17,20 @@ fi
 "$COLAB_PYTHON" -m pip install --upgrade -r requirements-colab.txt
 "$COLAB_PYTHON" -m pip install --no-deps --editable .
 
+# Some Colab images ship a torchao version whose public API is older than the
+# one expected by current Diffusers. ReDiS does not use TorchAO, so remove only
+# that optional package when its import contract is broken.
+if ! "$COLAB_PYTHON" - <<'PY'
+import importlib.util
+
+if importlib.util.find_spec("torchao") is not None:
+    from torchao.quantization import FqnToConfig, quantize_  # noqa: F401
+PY
+then
+  echo "Removing incompatible optional torchao package..."
+  "$COLAB_PYTHON" -m pip uninstall --yes torchao
+fi
+
 mkdir -p .runtime
 printf '%s\n' "$COLAB_PYTHON" > .runtime/python_path
 

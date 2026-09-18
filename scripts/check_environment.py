@@ -60,6 +60,12 @@ if report["bitsandbytes"] is not None:
     if not torch.isfinite(output).all():
         raise SystemExit("ERROR: bitsandbytes CUDA smoke test produced non-finite output")
     print("bitsandbytes_cuda_smoke=ok")
+
+# Import the real pipeline, not just the top-level diffusers package. This
+# catches incompatible optional packages such as a stale Colab torchao build.
+from diffusers import Flux2KleinPipeline
+
+print(f"flux2_pipeline_import={Flux2KleinPipeline.__name__}:ok")
 if report.get("gpu_vram_gib", 0) < 12:
     print(
         "WARNING: less than 12 GiB VRAM; use configs/flux2_klein_4b_low_vram.yaml. "

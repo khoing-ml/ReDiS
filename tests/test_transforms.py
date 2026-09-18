@@ -9,7 +9,11 @@ from redis.methods import (
     projected_amplify,
     residual_amplify,
 )
-from redis.methods.transforms import cap_relative_correction, rms_match
+from redis.methods.transforms import (
+    cap_relative_correction,
+    match_relative_correction,
+    rms_match,
+)
 
 
 def test_random_basis_is_orthonormal_and_seeded():
@@ -53,6 +57,21 @@ def test_gram_whitening_flattens_anisotropic_spectrum():
     assert after < before
 
 
+def test_gram_diagnostics_describe_projected_transform():
+    hidden = torch.randn(4, 5, 8)
+    hidden[0] *= 4
+    q = make_random_basis(8, 4, device=torch.device("cpu"), seed=0)
+    modified, diagnostics = gram_isotropize(
+        hidden, q, beta=0.5, gamma=0.3, return_diagnostics=True
+    )
+    assert modified.shape == hidden.shape
+    assert diagnostics["projected_pre_spectrum"]["effective_rank"] > 0
+    assert diagnostics["projected_post_spectrum"]["effective_rank"] > 0
+    assert diagnostics["whitening_scale_min"] is not None
+    assert diagnostics["whitening_scale_max"] is not None
+    assert diagnostics["relative_delta_y_norm"] >= 0
+
+
 def test_rms_match_and_correction_cap():
     reference = torch.randn(4, 5, 8)
     modified = reference * 3
@@ -66,3 +85,12 @@ def test_rms_match_and_correction_cap():
     ratio = (capped - reference).norm() / reference.norm()
     assert float(ratio) == pytest.approx(0.1, rel=1e-5)
 
+
+def test_correction_strength_matching_hits_target():
+    reference = torch.randn(4, 5, 8)
+    modified = reference + torch.randn_like(reference)
+    matched, scale, raw = match_relative_correction(modified, reference, 0.05)
+    achieved = (matched - reference).norm() / reference.norm()
+    assert float(achieved) == pytest.approx(0.05, rel=2e-5)
+    assert scale > 0
+    assert raw > 0

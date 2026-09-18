@@ -23,6 +23,8 @@ capture:
   layer_ids: [0]
 
 intervention:
+  sites:
+    transformer_blocks: [0]
   timestep_ids: [0]
   gamma: 0.3
   sigma: 0.1
@@ -31,6 +33,5 @@ intervention:
   max_relative_correction_norm: 0.25
 
 projection:
-  rank: 64
+  rank: 256
   seed: 0
-

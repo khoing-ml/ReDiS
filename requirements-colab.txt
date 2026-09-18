@@ -1,5 +1,7 @@
 # Colab already provides a CUDA-compatible torch build. Do not add torch here:
 # replacing it downloads several GB and can mismatch the runtime driver.
+# TorchAO is also intentionally omitted; ReDiS does not use it, and some Colab
+# images bundle an older optional TorchAO API that current Diffusers rejects.
 accelerate==1.15.0
 bitsandbytes==0.50.2
 diffusers @ git+https://github.com/huggingface/diffusers.git@a3e0b8ec235c27a6c17a21976daf7fd32d819d05

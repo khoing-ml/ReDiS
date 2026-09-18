@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from redis.analysis import seed_spectrum
+from redis.analysis import representation_diagnostics, seed_spectrum
 
 
 def test_isotropic_seed_spectrum_has_full_centered_rank():
@@ -27,3 +27,13 @@ def test_spectrum_rejects_single_seed():
     with pytest.raises(ValueError):
         seed_spectrum(torch.randn(1, 2, 3))
 
+
+def test_representation_diagnostics_include_complementary_views():
+    hidden = torch.randn(4, 16, 8)
+    basis = torch.eye(8)[:, :4]
+    result = representation_diagnostics(hidden, projection_basis=basis)
+    assert result["shape"] == [4, 16, 8]
+    assert result["spatial_grid"] == [4, 4]
+    assert result["spatial_low_frequency_spectrum"] is not None
+    assert result["projected_spectrum"]["effective_rank"] > 0
+    assert len(result["residual_rms"]["per_seed"]) == 4

@@ -17,6 +17,11 @@ interpreter under `.runtime/python_path`. It deliberately does not replace
 PyTorch or the CUDA runtime. This also avoids relying on `ensurepip`, which is
 not functional in every Colab runtime image.
 
+Some Colab images contain an optional `torchao` build that is incompatible
+with the pinned Diffusers commit. ReDiS does not use TorchAO; setup probes its
+API and removes it only when incompatible. The required bf16 and bitsandbytes
+paths are unaffected.
+
 The project supports Python 3.10 through 3.13 so it works with both current
 and recent Colab runtime images.
 
@@ -31,6 +36,30 @@ Run checks and experiments one at a time:
 !bash bash/07_test_residual_amplification.sh .runtime/colab_intervention.yaml
 !bash bash/08_test_projected_amplification.sh .runtime/colab_intervention.yaml
 !bash bash/09_test_gram_isotropization.sh .runtime/colab_intervention.yaml
+```
+
+The A100 diagnosis config uses B=16 and captures valid Klein 4B depths
+`transformer_blocks=[0,2,4]` and
+`single_transformer_blocks=[0,4,9,14,19]` at all four timesteps. Its
+`summary.json` ranks the most concentrated spectrum views.
+
+After choosing a contracted site, strength-match individual intervention runs
+by passing a target correction norm as the second argument:
+
+```python
+!bash bash/07_test_residual_amplification.sh .runtime/colab_intervention.yaml 0.02
+!bash bash/08_test_projected_amplification.sh .runtime/colab_intervention.yaml 0.02
+!bash bash/09_test_gram_isotropization.sh .runtime/colab_intervention.yaml 0.02
+```
+
+Repeat with `0.05` and `0.10`. Do not interpret this sweep until the
+intervention config points to a site where diagnosis found contraction.
+
+Evaluate DINO image diversity, CLIP image diversity, and CLIP prompt alignment
+for any output directory containing at least two seed images:
+
+```python
+!bash bash/10_evaluate_feature_diversity.sh outputs/gram_isotropization/RUN_TIMESTAMP
 ```
 
 The first model command downloads a large checkpoint. To persist the Hugging

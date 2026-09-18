@@ -52,7 +52,7 @@ def load_pipeline(model_config: dict[str, Any]):
 
     kwargs: dict[str, Any] = {
         "revision": model_config.get("revision"),
-        "torch_dtype": dtype,
+        "dtype": dtype,
         "local_files_only": bool(model_config.get("local_files_only", False)),
         "quantization_config": _quantization_config(quantization, dtype),
     }
