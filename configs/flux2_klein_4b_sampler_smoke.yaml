@@ -33,6 +33,12 @@ sampler:
   random_seed: 0
   eps: 1.0e-8
   capture_trajectory: true
+  finite_consistency_check: true
+  trust_region: false
+  trust_region_tolerance: 0.0
+  trust_region_shrink_factor: 0.5
+  trust_region_max_shrinks: 4
+  strength_schedule: null
 
 sampler_ablation:
   conditions:

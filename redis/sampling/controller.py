@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import types
+from contextlib import nullcontext
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -47,6 +48,12 @@ class SamplingRefinementConfig:
     random_seed: int = 0
     eps: float = 1e-8
     capture_trajectory: bool = False
+    finite_consistency_check: bool = True
+    trust_region: bool = False
+    trust_region_tolerance: float = 0.0
+    trust_region_shrink_factor: float = 0.5
+    trust_region_max_shrinks: int = 4
+    strength_schedule: list[float] | None = None
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any] | None) -> "SamplingRefinementConfig":
@@ -95,6 +102,19 @@ class SamplingRefinementConfig:
             raise ValueError("target_relative_correction_norm cannot exceed the correction cap")
         if self.eps <= 0:
             raise ValueError("eps must be positive")
+        if self.trust_region and not self.finite_consistency_check:
+            raise ValueError("trust_region requires finite_consistency_check")
+        if self.trust_region_tolerance < 0:
+            raise ValueError("trust_region_tolerance must be non-negative")
+        if not 0 < self.trust_region_shrink_factor < 1:
+            raise ValueError("trust_region_shrink_factor must be in (0, 1)")
+        if self.trust_region_max_shrinks < 0:
+            raise ValueError("trust_region_max_shrinks must be non-negative")
+        if self.strength_schedule is not None:
+            if not self.strength_schedule:
+                raise ValueError("strength_schedule must be non-empty or null")
+            if any(value < 0 for value in self.strength_schedule):
+                raise ValueError("strength_schedule values must be non-negative")
 
 
 def _per_sample(values: torch.Tensor) -> list[float]:
@@ -129,7 +149,7 @@ class SamplingRefinementController:
         self.transformer = transformer
         if (
             self.config.normal_estimator == "vjp"
-            and self.config.mode in ("tangent", "non_increasing")
+            and self.config.mode != "native"
             and transformer is None
         ):
             raise ValueError("The VJP normal estimator requires a transformer")
@@ -143,6 +163,10 @@ class SamplingRefinementController:
         self._previous_sigma: float | None = None
         self._pending_vjp_normal: torch.Tensor | None = None
         self._pending_vjp_score: torch.Tensor | None = None
+        self._last_transformer_args: tuple[Any, ...] | None = None
+        self._last_transformer_kwargs: dict[str, Any] | None = None
+        self._last_model_hidden: torch.Tensor | None = None
+        self._trial_evaluation = False
         self._step_id = 0
         self._installed = False
         self._original_step: Any = None
@@ -163,7 +187,7 @@ class SamplingRefinementController:
         self.scheduler.step = self.step
         if (
             self.config.normal_estimator == "vjp"
-            and self.config.mode in ("tangent", "non_increasing")
+            and self.config.mode != "native"
         ):
             self._install_vjp_normal_hook()
         self._installed = True
@@ -237,6 +261,12 @@ class SamplingRefinementController:
             proposal = proposal * scale
         return proposal
 
+    def _strength(self) -> float:
+        schedule = self.config.strength_schedule
+        if schedule is None:
+            return self.config.strength
+        return float(schedule[min(self._step_id, len(schedule) - 1)])
+
     def _normal(self, velocity: torch.Tensor, x0: torch.Tensor) -> torch.Tensor:
         if self.config.normal_estimator == "vjp":
             if self._pending_vjp_normal is None:
@@ -250,6 +280,118 @@ class SamplingRefinementController:
             # Stop-gradient approximation to d ||x0(x)-x0_prev||^2 / dx.
             return x0.float() - self._previous_x0.float()
         return velocity.float() - self._velocities[-1].float()
+
+    def _evaluate_consistency(self, state: torch.Tensor, sigma: float) -> torch.Tensor:
+        if (
+            self.transformer is None
+            or self._last_transformer_args is None
+            or self._last_transformer_kwargs is None
+            or self._last_model_hidden is None
+            or self._previous_x0 is None
+        ):
+            raise RuntimeError("Finite consistency evaluation is missing transformer context")
+        token_count = state.shape[1]
+        model_state = state.to(self._last_model_hidden.dtype)
+        if self._last_model_hidden.shape[1] > token_count:
+            model_state = torch.cat(
+                [model_state, self._last_model_hidden[:, token_count:]], dim=1
+            )
+        kwargs = dict(self._last_transformer_kwargs)
+        kwargs["hidden_states"] = model_state
+        cache_context = (
+            self.transformer.cache_context("cond")
+            if hasattr(self.transformer, "cache_context")
+            else nullcontext()
+        )
+        self._trial_evaluation = True
+        try:
+            with torch.no_grad(), cache_context:
+                output = self.transformer(*self._last_transformer_args, **kwargs)
+        finally:
+            self._trial_evaluation = False
+        prediction = output[0] if isinstance(output, tuple) else output
+        if not torch.is_tensor(prediction):
+            raise TypeError("Finite consistency evaluation expected transformer tensor output")
+        prediction = prediction[:, :token_count]
+        trial_x0 = state.float() - sigma * prediction.float()
+        difference = trial_x0 - self._previous_x0.to(trial_x0.device).float()
+        return 0.5 * difference.square().flatten(1).mean(dim=1)
+
+    def _finite_consistency_diagnostics(
+        self,
+        sample: torch.Tensor,
+        correction: torch.Tensor,
+        normal: torch.Tensor,
+        native_velocity: torch.Tensor,
+        *,
+        sigma: float,
+        next_sigma: float,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        if self._pending_vjp_score is None:
+            raise RuntimeError("Finite consistency check requires the VJP objective")
+        before = self._pending_vjp_score.to(sample.device).float()
+        dt = next_sigma - sigma
+        scales = torch.ones(sample.shape[0], device=sample.device)
+        shrink_counts = torch.zeros(
+            sample.shape[0], device=sample.device, dtype=torch.int64
+        )
+
+        def scaled_correction() -> torch.Tensor:
+            shape = (scales.shape[0], *([1] * (correction.ndim - 1)))
+            return correction * scales.reshape(shape)
+
+        trial_correction = scaled_correction()
+        state_delta = dt * trial_correction
+        after = self._evaluate_consistency(sample.float() + state_delta, sigma)
+        if self.config.trust_region:
+            for _ in range(self.config.trust_region_max_shrinks):
+                failing = after > before + self.config.trust_region_tolerance
+                if not bool(failing.any()):
+                    break
+                scales = torch.where(
+                    failing,
+                    scales * self.config.trust_region_shrink_factor,
+                    scales,
+                )
+                shrink_counts = shrink_counts + failing.to(shrink_counts.dtype)
+                trial_correction = scaled_correction()
+                state_delta = dt * trial_correction
+                after = self._evaluate_consistency(sample.float() + state_delta, sigma)
+            rejected = after > before + self.config.trust_region_tolerance
+            if bool(rejected.any()):
+                scales = torch.where(rejected, torch.zeros_like(scales), scales)
+                trial_correction = scaled_correction()
+                state_delta = dt * trial_correction
+                after = torch.where(rejected, before, after)
+        else:
+            rejected = torch.zeros_like(before, dtype=torch.bool)
+
+        linear_change = batched_dot(normal, state_delta)
+        delta_squared = batched_dot(state_delta, state_delta)
+        curvature = (after - before - linear_change) / delta_squared.clamp_min(
+            self.config.eps
+        )
+        curvature = torch.where(
+            delta_squared > self.config.eps,
+            curvature,
+            torch.zeros_like(curvature),
+        )
+        return trial_correction, {
+            "consistency_before": before,
+            "consistency_after": after,
+            "consistency_ratio": after / before.clamp_min(self.config.eps),
+            "finite_directional_curvature": curvature,
+            "applied_state_directional_derivative": linear_change,
+            "trust_region_scale": scales,
+            "trust_region_shrinks": shrink_counts,
+            "trust_region_rejected": rejected,
+            "state_correction_norm": batched_norm(state_delta),
+            "state_correction_relative_native_update": _ratios(
+                state_delta,
+                dt * native_velocity,
+                self.config.eps,
+            ),
+        }
 
     def step(
         self,
@@ -272,6 +414,7 @@ class SamplingRefinementController:
         normal: torch.Tensor | None = None
         normal_subspace: torch.Tensor | None = None
         constraint_active: torch.Tensor | None = None
+        finite_diagnostics: dict[str, torch.Tensor] = {}
         cap_scale = torch.ones(model_output.shape[0], device=model_output.device)
         match_scale = torch.ones(model_output.shape[0], device=model_output.device)
 
@@ -282,15 +425,39 @@ class SamplingRefinementController:
             directions = directions[: self.config.history_size]
             if self.config.mode == "naive":
                 projected = proposal
+                if self.config.normal_estimator == "vjp":
+                    normal = self._normal(native_velocity, native_x0)
+                    normal_subspace = (next_sigma - sigma) * normal
+                    constraint_active = torch.zeros(
+                        model_output.shape[0],
+                        device=model_output.device,
+                        dtype=torch.bool,
+                    )
             elif self.config.mode == "subspace":
                 projected, _ = project_onto_span(proposal, directions, eps=self.config.eps)
                 proposal_subspace = projected
+                if self.config.normal_estimator == "vjp":
+                    normal = self._normal(native_velocity, native_x0)
+                    normal_subspace, _ = project_onto_span(
+                        (next_sigma - sigma) * normal,
+                        directions,
+                        eps=self.config.eps,
+                    )
+                    constraint_active = torch.zeros(
+                        model_output.shape[0],
+                        device=model_output.device,
+                        dtype=torch.bool,
+                    )
             else:
                 normal = self._normal(native_velocity, native_x0)
+                # The scheduler applies a velocity correction as the state
+                # displacement delta_x = (sigma_next - sigma) * delta_v.
+                # Constrain the derivative along that actual displacement.
+                update_normal = (next_sigma - sigma) * normal
                 if self.config.mode == "tangent":
                     projected, projection_diagnostics = tangent_project(
                         proposal,
-                        normal,
+                        update_normal,
                         directions,
                         tangent_strength=self.config.tangent_strength,
                         eps=self.config.eps,
@@ -298,14 +465,14 @@ class SamplingRefinementController:
                 else:
                     projected, projection_diagnostics = non_increasing_project(
                         proposal,
-                        normal,
+                        update_normal,
                         directions,
                         eps=self.config.eps,
                     )
                 proposal_subspace = projection_diagnostics["proposal_subspace"]
                 normal_subspace = projection_diagnostics["normal_subspace"]
                 constraint_active = projection_diagnostics["constraint_active"]
-            correction = self.config.strength * projected
+            correction = self._strength() * projected
             correction, match_scale = match_relative_norm(
                 correction,
                 native_velocity,
@@ -323,6 +490,19 @@ class SamplingRefinementController:
                 fallback = "non_finite_correction"
             else:
                 fallback = None
+            if (
+                self.config.finite_consistency_check
+                and self.config.normal_estimator == "vjp"
+                and normal is not None
+            ):
+                correction, finite_diagnostics = self._finite_consistency_diagnostics(
+                    sample,
+                    correction,
+                    normal,
+                    native_velocity,
+                    sigma=sigma,
+                    next_sigma=next_sigma,
+                )
             corrected_velocity = (native_velocity.float() + correction).to(model_output.dtype)
         else:
             fallback = "inactive"
@@ -343,6 +523,7 @@ class SamplingRefinementController:
             "proposal": self.config.proposal,
             "normal_estimator": self.config.normal_estimator,
             "reliability_field": self.config.reliability_field,
+            "effective_strength": self._strength(),
             "native_velocity_norm": _per_sample(batched_norm(native_velocity)),
             "proposal_relative_norm": _per_sample(_ratios(proposal, native_velocity, self.config.eps)),
             "subspace_proposal_relative_norm": _per_sample(
@@ -350,6 +531,16 @@ class SamplingRefinementController:
             ),
             "projected_relative_norm": _per_sample(_ratios(projected, native_velocity, self.config.eps)),
             "correction_relative_norm": _per_sample(_ratios(correction, native_velocity, self.config.eps)),
+            "state_correction_norm": _per_sample(
+                batched_norm((next_sigma - sigma) * correction)
+            ),
+            "state_correction_relative_native_update": _per_sample(
+                _ratios(
+                    (next_sigma - sigma) * correction,
+                    (next_sigma - sigma) * native_velocity,
+                    self.config.eps,
+                )
+            ),
             "subspace_retention": _per_sample(
                 batched_norm(proposal_subspace)
                 / batched_norm(proposal).clamp_min(self.config.eps)
@@ -366,7 +557,11 @@ class SamplingRefinementController:
         if normal is not None:
             log["normal_norm"] = _per_sample(batched_norm(normal))
             assert normal_subspace is not None
-            log["projected_normal_norm"] = _per_sample(batched_norm(normal_subspace))
+            dt_abs = abs(next_sigma - sigma)
+            projected_state_normal = normal_subspace / max(dt_abs, self.config.eps)
+            log["projected_normal_norm"] = _per_sample(
+                batched_norm(projected_state_normal)
+            )
             log["pre_projection_normal_cosine"] = _per_sample(
                 batched_dot(proposal_subspace, normal_subspace)
                 / (
@@ -384,6 +579,8 @@ class SamplingRefinementController:
                 batched_dot(projected, normal_subspace)
             )
             log["constraint_active"] = constraint_active.detach().cpu().tolist()
+        for key, value in finite_diagnostics.items():
+            log[key] = value.detach().cpu().tolist()
         if self._pending_vjp_score is not None:
             log["vjp_consistency_objective"] = _per_sample(self._pending_vjp_score)
         self.logs.append(log)
@@ -399,6 +596,9 @@ class SamplingRefinementController:
                     "x0": native_x0.detach().float().cpu(),
                     "proposal": proposal.detach().float().cpu(),
                     "correction": correction.detach().float().cpu(),
+                    "state_correction": (
+                        (next_sigma - sigma) * correction
+                    ).detach().float().cpu(),
                 }
             )
 
@@ -418,6 +618,8 @@ class SamplingRefinementController:
         controller = self
 
         def vjp_forward(module: torch.nn.Module, *args: Any, **kwargs: Any) -> Any:
+            if controller._trial_evaluation:
+                return controller._original_forward(*args, **kwargs)
             if not controller._active() or controller._previous_x0 is None:
                 return controller._original_forward(*args, **kwargs)
             if controller._pending_vjp_normal is not None:
@@ -427,6 +629,9 @@ class SamplingRefinementController:
             if "hidden_states" not in kwargs:
                 raise RuntimeError("Exact normal hook requires keyword hidden_states")
             hidden = kwargs["hidden_states"].detach().requires_grad_(True)
+            controller._last_transformer_args = tuple(args)
+            controller._last_transformer_kwargs = dict(kwargs)
+            controller._last_model_hidden = kwargs["hidden_states"].detach()
             differentiable_kwargs = dict(kwargs)
             differentiable_kwargs["hidden_states"] = hidden
             with torch.enable_grad():

@@ -21,6 +21,8 @@ parser.add_argument("--mode", choices=MODES)
 parser.add_argument("--normal-estimator", choices=NORMAL_ESTIMATORS)
 parser.add_argument("--strength", type=float)
 parser.add_argument("--target-correction-norm", type=float)
+parser.add_argument("--trust-region", action="store_true")
+parser.add_argument("--strength-schedule", nargs="+", type=float)
 args = parser.parse_args()
 
 config = load_config(args.config)
@@ -35,6 +37,10 @@ if args.strength is not None:
     overrides["strength"] = args.strength
 if args.target_correction_norm is not None:
     overrides["target_relative_correction_norm"] = args.target_correction_norm
+if args.trust_region:
+    overrides["trust_region"] = True
+if args.strength_schedule is not None:
+    overrides["strength_schedule"] = args.strength_schedule
 if overrides:
     sampler_config = SamplingRefinementConfig.from_mapping(
         {**asdict(sampler_config), **overrides}

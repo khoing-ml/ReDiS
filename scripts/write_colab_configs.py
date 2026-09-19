@@ -128,6 +128,12 @@ def make_sampler_config() -> dict[str, object]:
         "random_seed": 0,
         "eps": 1e-8,
         "capture_trajectory": True,
+        "finite_consistency_check": True,
+        "trust_region": False,
+        "trust_region_tolerance": 0.0,
+        "trust_region_shrink_factor": 0.5,
+        "trust_region_max_shrinks": 4,
+        "strength_schedule": None,
     }
     config["sampler_ablation"] = {
         "conditions": [

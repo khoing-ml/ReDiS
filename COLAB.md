@@ -61,6 +61,25 @@ VJP mode enables an input-gradient pass through the 4B transformer. Use one
 seed at 256 px first on low-memory or quantized profiles. `residual_proxy` is
 available only as a diagnostic control; it is not a state-space normal.
 
+Finite consistency evaluation is enabled by default and adds one forward at
+each active step. To enable accept/shrink trust-region backtracking:
+
+```python
+!bash bash/14_run_manifold_sampler.sh .runtime/colab_sampler.yaml \
+  --mode non_increasing --normal-estimator vjp --trust-region
+```
+
+The finite check uses the actual scheduler displacement
+`delta_x=(sigma_next-sigma)*delta_v`; this matters because the sigma step is
+negative and large at the final denoising step.
+
+Run the unconstrained finite-correction diagnostic first with:
+
+```python
+!bash bash/14_run_manifold_sampler.sh .runtime/colab_sampler.yaml \
+  --mode naive --normal-estimator vjp --strength 0.2
+```
+
 Each captured view now logs raw and per-seed row-normalized effective rank,
 view RMS, and view energy relative to the full residual. The low-frequency
 diagnostic and intervention use the same 2x2 average-and-lift operator.

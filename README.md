@@ -114,7 +114,55 @@ interpreted as a geometric normal. VJP mode requires a single conditional pass
 Each sampler run writes images, the resolved config, environment information,
 per-step norms and consistency diagnostics, and (when
 `capture_trajectory: true`) `trajectory.pt` containing `x_k`, native velocity,
-`x0`, proposal, and applied correction.
+`x0`, proposal, velocity correction, and applied state correction.
+
+### Finite correction check and trust region
+
+The scheduler applies a velocity correction through the actual state
+displacement
+
+```text
+delta_x = (sigma_next - sigma) * delta_v
+```
+
+Because `sigma_next - sigma` is negative for the Diffusers FlowMatch schedule,
+the state-space directional derivative can have the opposite sign from
+`g^T delta_v`. Both the half-space constraint and finite check therefore use
+`delta_x`.
+
+With `finite_consistency_check: true`, every active step performs an additional
+forward evaluation at `x_k + delta_x`, at the same native timestep and against
+the same detached previous `x0`. It logs:
+
+- `consistency_before`, `consistency_after`, and `consistency_ratio`;
+- `finite_directional_curvature`;
+- `state_correction_norm` and its norm relative to the native state update.
+
+To measure the unconstrained velocity extrapolation before enabling any
+half-space projection, run:
+
+```bash
+bash bash/14_run_manifold_sampler.sh \
+  configs/flux2_klein_4b_sampler_smoke.yaml \
+  --mode naive --normal-estimator vjp --strength 0.2
+```
+
+This still computes the VJP and finite metrics, but applies the proposal
+without a consistency constraint.
+
+Enable trust-region backtracking with:
+
+```bash
+bash bash/14_run_manifold_sampler.sh \
+  configs/flux2_klein_4b_sampler_smoke.yaml \
+  --mode non_increasing --normal-estimator vjp --trust-region
+```
+
+Failed finite trials are scaled by `trust_region_shrink_factor` until they
+satisfy `S_after <= S_before + tolerance`; a trial still failing after
+`trust_region_max_shrinks` is rejected. This adds one forward per trial but no
+additional backward pass. A per-step strength can be supplied with, for
+example, `--strength-schedule 0 0.2 0.15 0.05`.
 
 The default ablation deliberately includes both velocity- and `x0`-difference
 proposals. Since `v_k-v_{k-1}` already lies in

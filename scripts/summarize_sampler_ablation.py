@@ -48,6 +48,11 @@ for condition_record in conditions:
     constraint_retention = flattened_step_values(active_steps, "constraint_retention")
     pre_cosines = flattened_step_values(active_steps, "pre_projection_normal_cosine")
     post_cosines = flattened_step_values(active_steps, "post_projection_normal_cosine")
+    consistency_ratios = flattened_step_values(active_steps, "consistency_ratio")
+    curvatures = flattened_step_values(active_steps, "finite_directional_curvature")
+    state_update_ratios = flattened_step_values(
+        active_steps, "state_correction_relative_native_update"
+    )
     row: dict[str, object] = {
         "condition": condition,
         "mode": report["config"]["mode"],
@@ -66,6 +71,12 @@ for condition_record in conditions:
         ),
         "mean_pre_projection_normal_cosine": mean(pre_cosines) if pre_cosines else None,
         "mean_post_projection_normal_cosine": mean(post_cosines) if post_cosines else None,
+        "mean_consistency_ratio": mean(consistency_ratios) if consistency_ratios else None,
+        "max_consistency_ratio": max(consistency_ratios) if consistency_ratios else None,
+        "mean_finite_directional_curvature": mean(curvatures) if curvatures else None,
+        "mean_state_correction_relative_native_update": (
+            mean(state_update_ratios) if state_update_ratios else None
+        ),
     }
     if metrics is not None:
         row.update(
