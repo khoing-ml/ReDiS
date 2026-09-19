@@ -111,6 +111,82 @@ def make_screening_config() -> dict[str, object]:
     return config
 
 
+def make_sampler_config() -> dict[str, object]:
+    config = make_config([0, 1])
+    config["sampler"] = {
+        "mode": "tangent",
+        "proposal": "velocity_difference",
+        "reliability_field": "x0_consistency",
+        "normal_estimator": "proxy",
+        "strength": 0.2,
+        "tangent_strength": 1.0,
+        "history_size": 2,
+        "start_step": 1,
+        "end_step": None,
+        "target_relative_correction_norm": None,
+        "max_relative_correction_norm": 0.25,
+        "random_seed": 0,
+        "eps": 1e-8,
+        "capture_trajectory": True,
+    }
+    config["sampler_ablation"] = {
+        "conditions": [
+            {"name": "native", "mode": "native"},
+            {
+                "name": "velocity_naive",
+                "mode": "naive",
+                "proposal": "velocity_difference",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "velocity_subspace",
+                "mode": "subspace",
+                "proposal": "velocity_difference",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "x0_naive",
+                "mode": "naive",
+                "proposal": "x0_difference",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "x0_subspace",
+                "mode": "subspace",
+                "proposal": "x0_difference",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "x0_tangent_proxy",
+                "mode": "tangent",
+                "proposal": "x0_difference",
+                "normal_estimator": "proxy",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "random_ambient",
+                "mode": "naive",
+                "proposal": "random_ambient",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "random_subspace",
+                "mode": "subspace",
+                "proposal": "random_ambient",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "random_tangent",
+                "mode": "tangent",
+                "proposal": "random_ambient",
+                "normal_estimator": "proxy",
+                "target_relative_correction_norm": 0.05,
+            },
+        ]
+    }
+    return config
+
+
 output_dir = Path(".runtime")
 output_dir.mkdir(exist_ok=True)
 diagnosis_group_size = 16 if vram_gib >= 30 and ram_gib >= 40 else 8
@@ -125,6 +201,7 @@ configs = {
     ),
     "colab_intervention.yaml": make_config([0, 1, 2, 3]),
     "colab_screening.yaml": make_screening_config(),
+    "colab_sampler.yaml": make_sampler_config(),
 }
 for filename, config in configs.items():
     (output_dir / filename).write_text(

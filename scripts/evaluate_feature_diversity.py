@@ -22,9 +22,16 @@ run_dir = Path(args.run_dir)
 files = sorted(run_dir.glob("seed_*.png"))
 if len(files) < 2:
     raise SystemExit(f"ERROR: need at least two seed_*.png files in {run_dir}")
-config_path = run_dir / "resolved_config.yaml"
-if not config_path.exists():
-    raise SystemExit(f"ERROR: missing {config_path}")
+config_path = next(
+    (
+        parent / "resolved_config.yaml"
+        for parent in (run_dir, *run_dir.parents)
+        if (parent / "resolved_config.yaml").exists()
+    ),
+    None,
+)
+if config_path is None:
+    raise SystemExit(f"ERROR: no resolved_config.yaml found at or above {run_dir}")
 config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 prompt = str(config["generation"]["prompt"])
 images = [Image.open(path).convert("RGB") for path in files]
