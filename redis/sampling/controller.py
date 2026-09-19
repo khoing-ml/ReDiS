@@ -172,7 +172,7 @@ class SamplingRefinementController:
     def _active(self) -> bool:
         return (
             self.config.mode != "native"
-            and self._velocities
+            and bool(self._velocities)
             and self._step_id >= self.config.start_step
             and (self.config.end_step is None or self._step_id <= self.config.end_step)
         )

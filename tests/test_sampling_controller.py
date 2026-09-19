@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -46,6 +47,15 @@ def test_native_mode_is_exact_identity_and_restores_scheduler():
     assert torch.equal(result, expected)
     assert restored == original
     assert all(not event["active"] for event in controller.logs)
+
+
+def test_sampler_report_is_json_serializable_after_trajectory_capture():
+    controller, _, _, _ = run_two_steps(
+        {"mode": "tangent", "capture_trajectory": True}
+    )
+    encoded = json.dumps(controller.report())
+    assert '"active": false' in encoded
+    assert '"active": true' in encoded
 
 
 def test_naive_velocity_difference_changes_second_step():
