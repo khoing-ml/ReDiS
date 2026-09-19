@@ -132,3 +132,7 @@ Useful environment variables:
 - `HF_HOME`: Hugging Face cache location.
 - `REDIS_OUTPUT_ROOT`: output root; defaults to `outputs`.
 - `REDIS_INSTALL_QUANT=0`: install without bitsandbytes.
+
+For `memory_mode: auto`, ReDiS maps the profile to Diffusers' supported
+`device_map: balanced` strategy. An explicit `model.device_map` may be supplied
+when another strategy is required by a particular Diffusers build.
