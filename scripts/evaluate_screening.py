@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 from redis.metrics import cosine_distance_summary
+from redis.metrics.rewards import pooled_feature_tensor
 
 
 parser = argparse.ArgumentParser()
@@ -113,11 +114,15 @@ if "clip" in args.metrics:
             image_inputs = processor(
                 images=images_for(group), return_tensors="pt"
             ).to(device)
-            image_features = model.get_image_features(**image_inputs).float()
+            image_features = pooled_feature_tensor(
+                model.get_image_features(**image_inputs)
+            ).float()
             text_inputs = processor(
                 text=[prompt], return_tensors="pt", padding=True
             ).to(device)
-            text_features = model.get_text_features(**text_inputs).float()
+            text_features = pooled_feature_tensor(
+                model.get_text_features(**text_inputs)
+            ).float()
             alignment = (
                 F.normalize(image_features, dim=-1)
                 @ F.normalize(text_features, dim=-1).T

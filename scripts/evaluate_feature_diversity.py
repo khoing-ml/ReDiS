@@ -11,6 +11,7 @@ from PIL import Image
 from transformers import AutoImageProcessor, AutoModel, CLIPModel, CLIPProcessor
 
 from redis.metrics import cosine_distance_summary
+from redis.metrics.rewards import pooled_feature_tensor
 
 
 parser = argparse.ArgumentParser()
@@ -79,9 +80,13 @@ for prompt_id, prompt, prompt_files in groups:
     images = [Image.open(path).convert("RGB") for path in prompt_files]
     with torch.inference_mode():
         image_inputs = clip_processor(images=images, return_tensors="pt").to(device)
-        clip_image = clip.get_image_features(**image_inputs).float()
+        clip_image = pooled_feature_tensor(
+            clip.get_image_features(**image_inputs)
+        ).float()
         text_inputs = clip_processor(text=[prompt], return_tensors="pt", padding=True).to(device)
-        clip_text = clip.get_text_features(**text_inputs).float()
+        clip_text = pooled_feature_tensor(
+            clip.get_text_features(**text_inputs)
+        ).float()
         alignment = (
             F.normalize(clip_image, dim=-1) @ F.normalize(clip_text, dim=-1).T
         ).squeeze(1)

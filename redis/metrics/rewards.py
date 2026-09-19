@@ -11,6 +11,22 @@ from PIL import Image
 RewardBackend = Callable[[Sequence[Image.Image], Sequence[str]], list[float]]
 
 
+def pooled_feature_tensor(value: Any) -> Any:
+    """Normalize CLIP feature return types across Transformers 4.x and 5.x."""
+    pooled = getattr(value, "pooler_output", None)
+    if pooled is not None:
+        return pooled
+    if hasattr(value, "norm"):
+        return value
+    if isinstance(value, (tuple, list)):
+        for candidate in reversed(value):
+            if hasattr(candidate, "norm") and getattr(candidate, "ndim", 0) == 2:
+                return candidate
+    raise TypeError(
+        "CLIP feature method returned neither a tensor nor an output with pooler_output"
+    )
+
+
 class RewardEvaluator:
     """Lazy, pluggable reward evaluation with one score per image/prompt pair."""
 
@@ -69,8 +85,12 @@ class PickScoreBackend:
             text=list(prompts), padding=True, truncation=True, max_length=77, return_tensors="pt"
         ).to(self.device)
         with torch.inference_mode():
-            image_features = self.model.get_image_features(**image_inputs)
-            text_features = self.model.get_text_features(**text_inputs)
+            image_features = pooled_feature_tensor(
+                self.model.get_image_features(**image_inputs)
+            )
+            text_features = pooled_feature_tensor(
+                self.model.get_text_features(**text_inputs)
+            )
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
             scores = self.model.logit_scale.exp() * (text_features * image_features).sum(dim=-1)
