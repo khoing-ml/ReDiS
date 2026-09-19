@@ -40,21 +40,25 @@ Run checks and the row-normalized diagnostic one at a time:
 
 ## Consistency-non-increasing sampler
 
-The setup also writes `.runtime/colab_sampler.yaml`. It uses the actual VJP
+The setup also writes `.runtime/colab_sampler.yaml` and
+`.runtime/colab_ccsr_debug.yaml`. They use the actual VJP
 normal `grad_x 0.5||x0(x)-stopgrad(x0_ref)||^2` and a non-increasing half-space
 constraint:
 
 ```python
 !bash bash/14_run_manifold_sampler.sh .runtime/colab_sampler.yaml
-!bash bash/15_run_sampler_ablation.sh .runtime/colab_sampler.yaml
+!bash bash/15_run_sampler_ablation.sh
 ```
 
-The ablation uses matched seeds and compares native, ambient, subspace-only,
-equality-tangent, legacy residual-proxy, and non-increasing corrections.
+With no argument, `bash/15` automatically selects the hardware-adjusted
+`.runtime/colab_ccsr_debug.yaml` on Colab. The ablation uses 20 fixed prompts,
+four matched seeds, and the native, naive, projection-only, and
+projection-plus-trust-region conditions.
 Evaluate every condition directory with:
 
 ```python
 !bash bash/16_evaluate_sampler_ablation.sh outputs/sampler_ablation/RUN_TIMESTAMP
+!bash bash/17_evaluate_sampler_rewards.sh latest
 ```
 
 VJP mode enables an input-gradient pass through the 4B transformer. Use one

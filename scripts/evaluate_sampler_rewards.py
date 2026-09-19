@@ -53,7 +53,13 @@ args = parser.parse_args()
 if args.batch_size < 1:
     raise SystemExit("ERROR: --batch-size must be positive")
 run_dir = Path(args.run_dir)
-conditions = json.loads((run_dir / "ablation.json").read_text(encoding="utf-8"))
+ablation_path = run_dir / "ablation.json"
+if not ablation_path.exists():
+    raise SystemExit(
+        f"ERROR: {ablation_path} does not exist. Generation did not finish, or "
+        "RUN_TIMESTAMP was copied literally instead of using the emitted run path."
+    )
+conditions = json.loads(ablation_path.read_text(encoding="utf-8"))
 evaluator = RewardEvaluator()
 condition_scores: dict[str, dict[str, dict[tuple[str, int], float]]] = {}
 condition_reports: dict[str, dict[str, Any]] = {}

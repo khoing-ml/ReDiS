@@ -193,6 +193,10 @@ four seeds, and exactly four conditions:
 - first-order consistency projection;
 - projection plus finite trust-region backtracking.
 
+After `bash/00_setup_colab.sh`, the same command automatically prefers
+`.runtime/colab_ccsr_debug.yaml`, whose memory limits are derived from the
+current Colab GPU and host RAM.
+
 The pinned prompt files and source metadata live under `prompts/`. Rebuild or
 verify them without silently overwriting changes with:
 
@@ -206,7 +210,7 @@ After generation, score all matched prompt/seed samples with PickScore and
 compute paired deltas against native sampling:
 
 ```bash
-bash bash/17_evaluate_sampler_rewards.sh outputs/sampler_ablation/RUN_TIMESTAMP
+bash bash/17_evaluate_sampler_rewards.sh latest
 ```
 
 The evaluator writes `reward_scores.json` and `reward_summary.json`, including

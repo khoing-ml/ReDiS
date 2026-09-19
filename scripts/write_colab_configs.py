@@ -207,6 +207,46 @@ def make_sampler_config() -> dict[str, object]:
     return config
 
 
+def make_ccsr_debug_config() -> dict[str, object]:
+    config = make_sampler_config()
+    config["generation"].pop("prompt")
+    config["generation"].update(
+        {
+            "prompt_file": "prompts/pickscore_debug.jsonl",
+            "seeds": [0, 1, 2, 3],
+        }
+    )
+    config["sampler"]["capture_trajectory"] = False
+    config["sampler_ablation"] = {
+        "conditions": [
+            {
+                "name": "native",
+                "mode": "native",
+                "finite_consistency_check": False,
+            },
+            {
+                "name": "naive",
+                "mode": "naive",
+                "normal_estimator": "vjp",
+                "trust_region": False,
+            },
+            {
+                "name": "projection",
+                "mode": "non_increasing",
+                "normal_estimator": "vjp",
+                "trust_region": False,
+            },
+            {
+                "name": "projection_trust_region",
+                "mode": "non_increasing",
+                "normal_estimator": "vjp",
+                "trust_region": True,
+            },
+        ]
+    }
+    return config
+
+
 output_dir = Path(".runtime")
 output_dir.mkdir(exist_ok=True)
 diagnosis_group_size = 16 if vram_gib >= 30 and ram_gib >= 40 else 8
@@ -222,6 +262,7 @@ configs = {
     "colab_intervention.yaml": make_config([0, 1, 2, 3]),
     "colab_screening.yaml": make_screening_config(),
     "colab_sampler.yaml": make_sampler_config(),
+    "colab_ccsr_debug.yaml": make_ccsr_debug_config(),
 }
 for filename, config in configs.items():
     (output_dir / filename).write_text(

@@ -91,9 +91,9 @@ resolved = dict(config)
 resolved["sampler_ablation_conditions"] = [
     {"name": name, **asdict(condition_config)} for name, condition_config in conditions
 ]
+pipe = load_pipeline(config["model"])
 run_dir = make_run_dir("sampler_ablation")
 write_run_metadata(run_dir, resolved)
-pipe = load_pipeline(config["model"])
 records = []
 manifest = [asdict(prompt) for prompt in prompts]
 (run_dir / "prompt_manifest.json").write_text(

@@ -37,7 +37,23 @@ def resolve_pipeline_device_map(
     )
 
 
-def _quantization_config(kind: str, dtype: torch.dtype):
+def bitsandbytes_quant_kwargs(
+    dtype: torch.dtype, *, allow_cpu_offload: bool
+) -> dict[str, Any]:
+    return {
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_use_double_quant": True,
+        "bnb_4bit_compute_dtype": dtype,
+        # Diffusers' BnB validator uses this flag for both 8-bit and 4-bit
+        # models when an inferred device map places modules on CPU or disk.
+        "llm_int8_enable_fp32_cpu_offload": allow_cpu_offload,
+    }
+
+
+def _quantization_config(
+    kind: str, dtype: torch.dtype, *, allow_cpu_offload: bool = False
+):
     if kind == "none":
         return None
     if kind != "bitsandbytes_4bit":
@@ -52,12 +68,9 @@ def _quantization_config(kind: str, dtype: torch.dtype):
 
     return PipelineQuantizationConfig(
         quant_backend="bitsandbytes_4bit",
-        quant_kwargs={
-            "load_in_4bit": True,
-            "bnb_4bit_quant_type": "nf4",
-            "bnb_4bit_use_double_quant": True,
-            "bnb_4bit_compute_dtype": dtype,
-        },
+        quant_kwargs=bitsandbytes_quant_kwargs(
+            dtype, allow_cpu_offload=allow_cpu_offload
+        ),
         components_to_quantize=["transformer", "text_encoder"],
     )
 
@@ -72,6 +85,9 @@ def load_pipeline(model_config: dict[str, Any]):
     dtype = DTYPES[dtype_name]
     memory_mode = str(model_config.get("memory_mode", "model_cpu_offload"))
     quantization = str(model_config.get("quantization", "none"))
+    allow_quantized_cpu_offload = bool(
+        model_config.get("quantized_cpu_offload", memory_mode == "auto")
+    )
     offload_dir = Path(model_config.get("offload_dir", ".offload/flux2-klein-4b"))
     offload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -79,7 +95,11 @@ def load_pipeline(model_config: dict[str, Any]):
         "revision": model_config.get("revision"),
         "dtype": dtype,
         "local_files_only": bool(model_config.get("local_files_only", False)),
-        "quantization_config": _quantization_config(quantization, dtype),
+        "quantization_config": _quantization_config(
+            quantization,
+            dtype,
+            allow_cpu_offload=allow_quantized_cpu_offload,
+        ),
     }
     if memory_mode == "auto":
         if not torch.cuda.is_available():

@@ -2,7 +2,12 @@ import torch
 
 import pytest
 
-from redis.models.flux2_klein import DTYPES, make_generators, resolve_pipeline_device_map
+from redis.models.flux2_klein import (
+    DTYPES,
+    bitsandbytes_quant_kwargs,
+    make_generators,
+    resolve_pipeline_device_map,
+)
 
 
 def test_flux2_loader_module_imports():
@@ -31,3 +36,11 @@ def test_auto_memory_profile_remains_compatible_with_older_diffusers():
 def test_explicit_unsupported_device_map_has_actionable_error():
     with pytest.raises(ValueError, match="balanced, cuda, cpu"):
         resolve_pipeline_device_map("disk", ["balanced", "cuda", "cpu"])
+
+
+def test_4bit_auto_offload_enables_fp32_cpu_modules():
+    kwargs = bitsandbytes_quant_kwargs(
+        DTYPES["bfloat16"], allow_cpu_offload=True
+    )
+    assert kwargs["load_in_4bit"] is True
+    assert kwargs["llm_int8_enable_fp32_cpu_offload"] is True
