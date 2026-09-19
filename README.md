@@ -52,6 +52,7 @@ bash bash/13_evaluate_screening.sh outputs/screening_site_A/RUN_TIMESTAMP
 bash bash/14_run_manifold_sampler.sh
 bash bash/15_run_sampler_ablation.sh
 bash bash/16_evaluate_sampler_ablation.sh outputs/sampler_ablation/RUN_TIMESTAMP
+bash bash/17_evaluate_sampler_rewards.sh outputs/sampler_ablation/RUN_TIMESTAMP
 ```
 
 `00` bootstraps `.venv` with Python 3.12. Set `REDIS_INSTALL_QUANT=0` to omit
@@ -66,7 +67,7 @@ Override the config with the first positional argument:
 bash bash/03_generate_baseline.sh configs/flux2_klein_4b_smoke.yaml
 ```
 
-## Manifold-preserving sampler
+## Consistency-constrained sampler
 
 The smoke config runs the full subspace-plus-half-space method with an actual
 VJP consistency normal. The previous prediction is a fixed, stop-gradient
@@ -164,11 +165,12 @@ satisfy `S_after <= S_before + tolerance`; a trial still failing after
 additional backward pass. A per-step strength can be supplied with, for
 example, `--strength-schedule 0 0.2 0.15 0.05`.
 
-The default ablation deliberately includes both velocity- and `x0`-difference
-proposals. Since `v_k-v_{k-1}` already lies in
+The broader orientation ablation in `configs/flux2_klein_4b_sampler_smoke.yaml`
+includes both velocity- and `x0`-difference proposals. Since
+`v_k-v_{k-1}` already lies in
 `span(v_k, v_{k-1})`, its subspace projection is mathematically an identity;
 the `x0` and seeded random controls are needed to test whether orientation,
-rather than correction norm alone, drives stability. Non-native default
+rather than correction norm alone, drives stability. Its non-native
 conditions are matched to correction norm `0.05`. The evaluation command
 writes per-condition feature metrics plus a combined JSON/CSV table with
 trajectory consistency and deltas against native sampling.
@@ -179,6 +181,38 @@ Per-step diagnostics distinguish the two projections:
 - `constraint_retention = ||r_safe|| / ||P_U r||`;
 - `pre_projection_normal_cosine` and `post_projection_normal_cosine`;
 - the directional derivatives `g^T r` before and after the constraint.
+
+### Fixed-prompt CCSR baseline
+
+`bash/15_run_sampler_ablation.sh` now defaults to the first validation grid in
+`configs/flux2_klein_4b_ccsr_debug.yaml`: 20 fixed Pick-a-Pic held-out prompts,
+four seeds, and exactly four conditions:
+
+- native sampling;
+- naive velocity refinement;
+- first-order consistency projection;
+- projection plus finite trust-region backtracking.
+
+The pinned prompt files and source metadata live under `prompts/`. Rebuild or
+verify them without silently overwriting changes with:
+
+```bash
+python scripts/prepare_benchmark_prompts.py
+```
+
+Each ablation run writes per-prompt images and diagnostics, plus aggregate
+correction, consistency, first-order failure, shrink, and rejection statistics.
+After generation, score all matched prompt/seed samples with PickScore and
+compute paired deltas against native sampling:
+
+```bash
+bash bash/17_evaluate_sampler_rewards.sh outputs/sampler_ablation/RUN_TIMESTAMP
+```
+
+The evaluator writes `reward_scores.json` and `reward_summary.json`, including
+paired bootstrap intervals and the correlation between finite consistency drift
+and quality change. `RewardEvaluator` is a metric registry so HPSv2, CLIPScore,
+and aesthetic backends can be added without changing the generation pipeline.
 
 The decisive screening is fixed to three sites (A/B/C), eight prompts, eight
 seeds, and per-seed correction norms 0.005/0.010/0.020. Run one site per

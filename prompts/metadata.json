@@ -1,0 +1,50 @@
+{
+  "subset_seed": 230501569,
+  "sources": {
+    "pickapic": {
+      "dataset": "Jialuo21/pickapic-test",
+      "revision": "c45a875adf0fe5f2896e46bbef2124f4953dcaa6",
+      "upstream": "pickapic-anonymous/pickapic_v1:test_unique",
+      "url": "https://huggingface.co/datasets/Jialuo21/pickapic-test/resolve/c45a875adf0fe5f2896e46bbef2124f4953dcaa6/test.jsonl"
+    },
+    "drawbench": {
+      "dataset": "sayakpaul/drawbench",
+      "revision": "ad794cba698c253ffdb6d18eff3fc87b004c1135",
+      "url": "https://huggingface.co/datasets/sayakpaul/drawbench/resolve/ad794cba698c253ffdb6d18eff3fc87b004c1135/DrawBench%20Prompts%20-%20Sheet1.csv"
+    }
+  },
+  "files": {
+    "pickscore_debug.jsonl": {
+      "count": 20,
+      "sha256": "08759f817eec20d38096b0182d5e6835a07d06ceed2207ee0c21a52940f5dd27"
+    },
+    "pickscore_debug.txt": {
+      "count": 20,
+      "sha256": "60657693cb618e2eeeea2481c265c5512e79d220bb04c14b854322a95bb5a9ce"
+    },
+    "pickscore_eval_100.jsonl": {
+      "count": 100,
+      "sha256": "4b6efe7ade62c7ccba3b5ce121d161195473ab3a9d0965e0cb624fb6e2a21afd"
+    },
+    "pickscore_eval_100.txt": {
+      "count": 100,
+      "sha256": "bddee51b0f2fee376c7ec85a9c4f0c482248c09a6fb60d8c935001aa9143c30a"
+    },
+    "pickscore_eval_500.jsonl": {
+      "count": 500,
+      "sha256": "af8007026cbc37f5541cc8c34ebde512d70bd4362c65303909143c9ea7d4fe69"
+    },
+    "pickscore_eval_500.txt": {
+      "count": 500,
+      "sha256": "72783e109cc4139635087e5341b6126449f9dae851186fe40c4f0f1a685d1708"
+    },
+    "drawbench.jsonl": {
+      "count": 200,
+      "sha256": "f6ceb2b4b929c1fc3c8d785c83156fd54aaac0d64d993186bb40d6ac96b7310d"
+    },
+    "drawbench.txt": {
+      "count": 200,
+      "sha256": "266321db2953aea2de25f6e2655a746edf9e219308b582129465300415788170"
+    }
+  }
+}

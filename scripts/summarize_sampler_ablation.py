@@ -40,6 +40,28 @@ for condition_record in conditions:
         if metrics_path.exists()
         else None
     )
+    if "prompt_runs" in report:
+        aggregate = report.get("aggregate", {})
+        row = {
+            "condition": condition,
+            "mode": report["config"]["mode"],
+            "proposal": report["config"]["proposal"],
+            "normal_estimator": report["config"]["normal_estimator"],
+            "target_relative_correction_norm": report["config"].get(
+                "target_relative_correction_norm"
+            ),
+            "prompt_count": report["prompt_count"],
+            "latency_seconds": report["latency_seconds"],
+            **aggregate,
+        }
+        if metrics is not None:
+            row.update(
+                dino_diversity=metrics["dino_image_diversity"]["mean"],
+                clip_image_diversity=metrics["clip_image_diversity"]["mean"],
+                clip_text_alignment=metrics["clip_text_image_alignment"]["mean"],
+            )
+        rows.append(row)
+        continue
     steps = report["steps"]
     consistency = flattened_step_values(steps[1:], "x0_consistency_norm")
     active_steps = [step for step in steps if step.get("active")]
@@ -53,6 +75,8 @@ for condition_record in conditions:
     state_update_ratios = flattened_step_values(
         active_steps, "state_correction_relative_native_update"
     )
+    rejected = flattened_step_values(active_steps, "trust_region_rejected")
+    shrinks = flattened_step_values(active_steps, "trust_region_shrinks")
     row: dict[str, object] = {
         "condition": condition,
         "mode": report["config"]["mode"],
@@ -77,6 +101,8 @@ for condition_record in conditions:
         "mean_state_correction_relative_native_update": (
             mean(state_update_ratios) if state_update_ratios else None
         ),
+        "trust_region_rejection_rate": mean(rejected) if rejected else None,
+        "mean_trust_region_shrinks": mean(shrinks) if shrinks else None,
     }
     if metrics is not None:
         row.update(
@@ -85,6 +111,29 @@ for condition_record in conditions:
             clip_text_alignment=metrics["clip_text_image_alignment"]["mean"],
         )
     rows.append(row)
+
+reward_summary_path = run_dir / "reward_summary.json"
+if reward_summary_path.exists():
+    reward_summary = json.loads(reward_summary_path.read_text(encoding="utf-8"))
+    for row in rows:
+        condition_metrics = reward_summary["conditions"].get(str(row["condition"]), {})
+        for metric, metric_summary in condition_metrics.items():
+            interval = metric_summary["mean_improvement_95ci"]
+            row.update(
+                {
+                    f"{metric}_mean_score": metric_summary["mean_score"],
+                    f"{metric}_mean_delta_vs_native": metric_summary[
+                        "mean_paired_improvement"
+                    ],
+                    f"{metric}_delta_ci_low": interval[0],
+                    f"{metric}_delta_ci_high": interval[1],
+                    f"{metric}_fraction_improved": metric_summary["fraction_improved"],
+                    f"{metric}_fraction_degraded": metric_summary["fraction_degraded"],
+                    f"{metric}_consistency_quality_correlation": metric_summary[
+                        "consistency_drift_quality_delta_correlation"
+                    ],
+                }
+            )
 
 native = next((row for row in rows if row["mode"] == "native"), None)
 if native is not None:

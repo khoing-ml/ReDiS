@@ -52,6 +52,18 @@ def test_native_mode_is_exact_identity_and_restores_scheduler():
     assert all(not event["active"] for event in controller.logs)
 
 
+@pytest.mark.parametrize("mode", ["naive", "subspace", "tangent", "non_increasing"])
+def test_zero_strength_matches_native_output_across_modes(mode):
+    _, result, _, _ = run_two_steps(
+        {
+            "mode": mode,
+            "strength": 0.0,
+            "max_relative_correction_norm": None,
+        }
+    )
+    assert torch.equal(result, torch.tensor([[[1.5, 0.5]]]))
+
+
 def test_sampler_report_is_json_serializable_after_trajectory_capture():
     controller, _, _, _ = run_two_steps(
         {

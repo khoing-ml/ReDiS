@@ -1,0 +1,59 @@
+model:
+  id: black-forest-labs/FLUX.2-klein-4B
+  revision: e7b7dc27f91deacad38e78976d1f2b499d76a294
+  dtype: bfloat16
+  memory_mode: auto
+  quantization: bitsandbytes_4bit
+  offload_dir: .offload/flux2-klein-4b
+  local_files_only: false
+  max_gpu_memory: 5GiB
+  max_cpu_memory: 5GiB
+
+generation:
+  prompt_file: prompts/pickscore_debug.jsonl
+  seeds: [0, 1, 2, 3]
+  height: 256
+  width: 256
+  num_inference_steps: 4
+  guidance_scale: 1.0
+  max_sequence_length: 128
+
+sampler:
+  mode: non_increasing
+  proposal: velocity_difference
+  reliability_field: x0_consistency
+  normal_estimator: vjp
+  strength: 0.2
+  tangent_strength: 1.0
+  history_size: 2
+  start_step: 1
+  end_step: null
+  target_relative_correction_norm: null
+  max_relative_correction_norm: 0.25
+  random_seed: 0
+  eps: 1.0e-8
+  capture_trajectory: false
+  finite_consistency_check: true
+  trust_region: false
+  trust_region_tolerance: 0.0
+  trust_region_shrink_factor: 0.5
+  trust_region_max_shrinks: 4
+  strength_schedule: null
+
+sampler_ablation:
+  conditions:
+    - name: native
+      mode: native
+      finite_consistency_check: false
+    - name: naive
+      mode: naive
+      normal_estimator: vjp
+      trust_region: false
+    - name: projection
+      mode: non_increasing
+      normal_estimator: vjp
+      trust_region: false
+    - name: projection_trust_region
+      mode: non_increasing
+      normal_estimator: vjp
+      trust_region: true
