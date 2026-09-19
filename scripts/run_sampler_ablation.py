@@ -14,7 +14,7 @@ from redis.utils.run import make_run_dir, write_run_metadata
 
 
 parser = argparse.ArgumentParser(
-    description="Generate matched-seed native/naive/subspace/tangent sampler ablations."
+    description="Generate matched-seed consistency-constrained sampler ablations."
 )
 parser.add_argument("--config", required=True)
 args = parser.parse_args()
@@ -35,19 +35,22 @@ if condition_specs is not None:
             raise SystemExit("ERROR: every sampler ablation condition must be a mapping")
         values = dict(specification)
         name = str(values.pop("name", f"condition_{index}"))
-        condition_config = replace(base, **values, capture_trajectory=False)
-        condition_config.validate()
+        condition_config = SamplingRefinementConfig.from_mapping(
+            {**asdict(base), **values, "capture_trajectory": False}
+        )
         conditions.append((name, condition_config))
 else:
     modes = [
         str(value)
-        for value in ablation.get("modes", ["native", "naive", "subspace", "tangent"])
+        for value in ablation.get(
+            "modes", ["native", "naive", "subspace", "non_increasing"]
+        )
     ]
     estimators = [
         str(value) for value in ablation.get("normal_estimators", [base.normal_estimator])
     ]
     for mode in modes:
-        if mode == "tangent":
+        if mode in ("tangent", "non_increasing"):
             for estimator in estimators:
                 conditions.append(
                     (
@@ -67,7 +70,7 @@ else:
                     replace(
                         base,
                         mode=mode,
-                        normal_estimator="proxy",
+                        normal_estimator="residual_proxy",
                         capture_trajectory=False,
                     ),
                 )
@@ -83,8 +86,8 @@ pipe = load_pipeline(config["model"])
 records = []
 
 for condition, sampler_config in conditions:
-    if sampler_config.normal_estimator == "exact" and float(generation["guidance_scale"]) > 1:
-        raise SystemExit("ERROR: exact normal requires guidance_scale <= 1")
+    if sampler_config.normal_estimator == "vjp" and float(generation["guidance_scale"]) > 1:
+        raise SystemExit("ERROR: VJP normal requires guidance_scale <= 1")
     controller = SamplingRefinementController(
         pipe.scheduler,
         sampler_config,

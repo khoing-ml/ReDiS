@@ -1,4 +1,4 @@
-# ReDiS: trajectory-tangent sampling
+# ReDiS: consistency-non-increasing sampling
 
 Training-free, geometry-constrained sampling refinement for few-step FLUX.2
 Klein. The implementation follows
@@ -6,13 +6,15 @@ Klein. The implementation follows
 hidden-state intervention harness available for comparison.
 
 At native step `k`, the sampler forms a numerical proposal, builds a local
-trajectory span, and removes the component normal to an `x0`-consistency level
-set:
+trajectory span, computes the actual state-space normal with a VJP, and removes
+only a proposal component that would increase `x0` inconsistency:
 
 ```text
 r = proposal(v_k, v_{k-1}, x0_k, x0_{k-1})
 r_sub = projection of r into span(v_k, v_{k-1}, ...)
-r_safe = r_sub - projection of r_sub onto the consistency normal
+e = x0_k - stopgrad(x0_previous)
+g = grad_x (0.5 * mean(e^2)) = J_x0^T e
+r_safe = projection of r_sub onto the half-space g^T r <= 0
 v_refined = v_k + lambda * r_safe
 ```
 
@@ -66,8 +68,9 @@ bash bash/03_generate_baseline.sh configs/flux2_klein_4b_smoke.yaml
 
 ## Manifold-preserving sampler
 
-The smoke config runs the full subspace-plus-tangent method with the low-cost
-stop-gradient consistency normal:
+The smoke config runs the full subspace-plus-half-space method with an actual
+VJP consistency normal. The previous prediction is a fixed, stop-gradient
+reference:
 
 ```bash
 bash bash/14_run_manifold_sampler.sh
@@ -80,10 +83,10 @@ Useful command-line overrides are:
 bash bash/14_run_manifold_sampler.sh \
   configs/flux2_klein_4b_sampler_smoke.yaml --mode native
 
-# Full consistency gradient through the transformer (high VRAM cost).
+# Equality-tangent ablation using the same actual VJP normal.
 bash bash/14_run_manifold_sampler.sh \
   configs/flux2_klein_4b_sampler_smoke.yaml \
-  --mode tangent --normal-estimator exact
+  --mode tangent --normal-estimator vjp
 
 # Match correction magnitude across orientation ablations.
 bash bash/14_run_manifold_sampler.sh \
@@ -97,15 +100,16 @@ Supported proposals are `velocity_difference`, `curvature`, `x0_difference`,
 - `native`: unchanged Euler sampling;
 - `naive`: add the ambient proposal;
 - `subspace`: restrict it to recent native velocities;
-- `tangent`: additionally preserve the configured reliability field to first
-  order.
+- `tangent`: equality projection preserving consistency to first order;
+- `non_increasing`: retain descent directions and remove only components for
+  which `g^T r > 0`. This is the default method.
 
-`normal_estimator: proxy` treats the model prediction as locally constant and
-is the practical default for quantized/offloaded inference.
-`normal_estimator: exact` differentiates `x0` consistency with respect to the
-current latent in one transformer pass; use full-precision/full-CUDA hardware
-when possible. Exact mode currently requires a single conditional pass
-(`guidance_scale <= 1`).
+`normal_estimator: vjp` differentiates `x0` consistency with respect to the
+current latent in the existing transformer forward pass. It computes a normal
+in state space; the previous `x0` prediction is detached. The legacy
+`residual_proxy` remains only as an explicit degeneracy control and must not be
+interpreted as a geometric normal. VJP mode requires a single conditional pass
+(`guidance_scale <= 1`) and materially more memory than inference-only mode.
 
 Each sampler run writes images, the resolved config, environment information,
 per-step norms and consistency diagnostics, and (when
@@ -120,6 +124,13 @@ rather than correction norm alone, drives stability. Non-native default
 conditions are matched to correction norm `0.05`. The evaluation command
 writes per-condition feature metrics plus a combined JSON/CSV table with
 trajectory consistency and deltas against native sampling.
+
+Per-step diagnostics distinguish the two projections:
+
+- `subspace_retention = ||P_U r|| / ||r||`;
+- `constraint_retention = ||r_safe|| / ||P_U r||`;
+- `pre_projection_normal_cosine` and `post_projection_normal_cosine`;
+- the directional derivatives `g^T r` before and after the constraint.
 
 The decisive screening is fixed to three sites (A/B/C), eight prompts, eight
 seeds, and per-seed correction norms 0.005/0.010/0.020. Run one site per

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from dataclasses import asdict, replace
+from dataclasses import asdict
 
 import torch
 
@@ -14,7 +14,7 @@ from redis.utils.run import make_run_dir, write_run_metadata
 
 
 parser = argparse.ArgumentParser(
-    description="Run native or trajectory-tangent sampling on FLUX.2 Klein."
+    description="Run native or consistency-non-increasing sampling on FLUX.2 Klein."
 )
 parser.add_argument("--config", required=True)
 parser.add_argument("--mode", choices=MODES)
@@ -36,13 +36,14 @@ if args.strength is not None:
 if args.target_correction_norm is not None:
     overrides["target_relative_correction_norm"] = args.target_correction_norm
 if overrides:
-    sampler_config = replace(sampler_config, **overrides)
-    sampler_config.validate()
+    sampler_config = SamplingRefinementConfig.from_mapping(
+        {**asdict(sampler_config), **overrides}
+    )
 
 seeds = [int(seed) for seed in generation["seeds"]]
-if sampler_config.normal_estimator == "exact" and float(generation["guidance_scale"]) > 1:
+if sampler_config.normal_estimator == "vjp" and float(generation["guidance_scale"]) > 1:
     raise SystemExit(
-        "ERROR: exact x0 normal currently requires guidance_scale <= 1 (one transformer pass per step)"
+        "ERROR: VJP x0 normal currently requires guidance_scale <= 1 (one transformer pass per step)"
     )
 
 resolved = dict(config)

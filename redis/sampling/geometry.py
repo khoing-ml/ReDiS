@@ -87,6 +87,17 @@ def project_onto_span(
     return projected, basis
 
 
+def project_onto_basis(
+    value: torch.Tensor,
+    basis: Sequence[torch.Tensor],
+) -> torch.Tensor:
+    projected = torch.zeros_like(value, dtype=torch.float32)
+    for vector in basis:
+        coefficient = batched_dot(value, vector)
+        projected = projected + _expand_batch(coefficient, value.ndim) * vector
+    return projected
+
+
 def tangent_project(
     proposal: torch.Tensor,
     normal: torch.Tensor,
@@ -99,10 +110,7 @@ def tangent_project(
     if not 0.0 <= tangent_strength <= 1.0:
         raise ValueError("tangent_strength must be in [0, 1]")
     proposal_subspace, basis = project_onto_span(proposal, directions, eps=eps)
-    normal_subspace = torch.zeros_like(normal, dtype=torch.float32)
-    for vector in basis:
-        coefficient = batched_dot(normal, vector)
-        normal_subspace = normal_subspace + _expand_batch(coefficient, normal.ndim) * vector
+    normal_subspace = project_onto_basis(normal, basis)
 
     denominator = batched_dot(normal_subspace, normal_subspace)
     coefficient = batched_dot(proposal_subspace, normal_subspace) / denominator.clamp_min(eps)
@@ -114,6 +122,40 @@ def tangent_project(
         "normal_subspace": normal_subspace,
         "removed": removed,
         "tangent_dot": batched_dot(safe, normal_subspace),
+        "constraint_active": denominator > eps,
+    }
+
+
+def non_increasing_project(
+    proposal: torch.Tensor,
+    normal: torch.Tensor,
+    directions: Sequence[torch.Tensor],
+    *,
+    eps: float = 1e-8,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Closest supported proposal satisfying ``normal.T @ proposal <= 0``.
+
+    This is the closed-form Euclidean projection onto the intersection of the
+    model-supported trajectory span and the consistency non-increasing
+    half-space. Descent components are retained; only ascent components are
+    removed.
+    """
+    proposal_subspace, basis = project_onto_span(proposal, directions, eps=eps)
+    normal_subspace = project_onto_basis(normal, basis)
+    denominator = batched_dot(normal_subspace, normal_subspace)
+    directional_derivative = batched_dot(proposal_subspace, normal_subspace)
+    active = (directional_derivative > 0) & (denominator > eps)
+    coefficient = directional_derivative / denominator.clamp_min(eps)
+    coefficient = torch.where(active, coefficient, torch.zeros_like(coefficient))
+    removed = _expand_batch(coefficient, proposal.ndim) * normal_subspace
+    safe = proposal_subspace - removed
+    return safe, {
+        "proposal_subspace": proposal_subspace,
+        "normal_subspace": normal_subspace,
+        "removed": removed,
+        "directional_derivative_pre": directional_derivative,
+        "directional_derivative_post": batched_dot(safe, normal_subspace),
+        "constraint_active": active,
     }
 
 

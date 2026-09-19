@@ -5,6 +5,7 @@ from redis.sampling import (
     batched_dot,
     cap_relative_norm,
     match_relative_norm,
+    non_increasing_project,
     orthonormalize,
     project_onto_span,
     tangent_project,
@@ -45,6 +46,31 @@ def test_partial_tangent_projection_retains_parallel_component():
     normal = torch.tensor([[[1.0, 0.0]]])
     safe, _ = tangent_project(proposal, normal, [proposal, normal], tangent_strength=0.5)
     assert torch.allclose(safe, torch.tensor([[[0.5, 1.0]]]), atol=1e-6)
+
+
+def test_non_increasing_projection_removes_only_ascent_component():
+    normal = torch.tensor([[[1.0, 0.0]]])
+    x = torch.tensor([[[1.0, 0.0]]])
+    y = torch.tensor([[[0.0, 1.0]]])
+    ascent = torch.tensor([[[1.0, 1.0]]])
+    safe, diagnostics = non_increasing_project(ascent, normal, [x, y])
+    assert torch.allclose(safe, torch.tensor([[[0.0, 1.0]]]), atol=1e-6)
+    assert diagnostics["constraint_active"].tolist() == [True]
+    assert float(diagnostics["directional_derivative_post"][0]) == pytest.approx(
+        0.0, abs=1e-6
+    )
+
+
+def test_non_increasing_projection_preserves_descent_component():
+    normal = torch.tensor([[[1.0, 0.0]]])
+    proposal = torch.tensor([[[-1.0, 1.0]]])
+    safe, diagnostics = non_increasing_project(
+        proposal,
+        normal,
+        [torch.tensor([[[1.0, 0.0]]]), torch.tensor([[[0.0, 1.0]]])],
+    )
+    assert torch.allclose(safe, proposal, atol=1e-6)
+    assert diagnostics["constraint_active"].tolist() == [False]
 
 
 def test_cap_relative_norm_is_per_sample():

@@ -38,10 +38,11 @@ Run checks and the row-normalized diagnostic one at a time:
 !bash bash/09_test_gram_isotropization.sh .runtime/colab_intervention.yaml
 ```
 
-## Trajectory-tangent sampler
+## Consistency-non-increasing sampler
 
-The setup also writes `.runtime/colab_sampler.yaml`. Start with the proxy
-normal, which works with quantization and CPU/disk offload:
+The setup also writes `.runtime/colab_sampler.yaml`. It uses the actual VJP
+normal `grad_x 0.5||x0(x)-stopgrad(x0_ref)||^2` and a non-increasing half-space
+constraint:
 
 ```python
 !bash bash/14_run_manifold_sampler.sh .runtime/colab_sampler.yaml
@@ -49,15 +50,16 @@ normal, which works with quantization and CPU/disk offload:
 ```
 
 The ablation uses matched seeds and compares native, ambient, subspace-only,
-and full tangent corrections. Evaluate every condition directory with:
+equality-tangent, legacy residual-proxy, and non-increasing corrections.
+Evaluate every condition directory with:
 
 ```python
 !bash bash/16_evaluate_sampler_ablation.sh outputs/sampler_ablation/RUN_TIMESTAMP
 ```
 
-Only try `--normal-estimator exact` on a high-memory, non-quantized profile.
-It enables gradients through the 4B transformer and is intentionally not the
-automatic Colab default.
+VJP mode enables an input-gradient pass through the 4B transformer. Use one
+seed at 256 px first on low-memory or quantized profiles. `residual_proxy` is
+available only as a diagnostic control; it is not a state-space normal.
 
 Each captured view now logs raw and per-seed row-normalized effective rank,
 view RMS, and view energy relative to the full residual. The low-frequency

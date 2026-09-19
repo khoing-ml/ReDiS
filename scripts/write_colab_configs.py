@@ -114,10 +114,10 @@ def make_screening_config() -> dict[str, object]:
 def make_sampler_config() -> dict[str, object]:
     config = make_config([0, 1])
     config["sampler"] = {
-        "mode": "tangent",
+        "mode": "non_increasing",
         "proposal": "velocity_difference",
         "reliability_field": "x0_consistency",
-        "normal_estimator": "proxy",
+        "normal_estimator": "vjp",
         "strength": 0.2,
         "tangent_strength": 1.0,
         "history_size": 2,
@@ -157,10 +157,24 @@ def make_sampler_config() -> dict[str, object]:
                 "target_relative_correction_norm": 0.05,
             },
             {
-                "name": "x0_tangent_proxy",
+                "name": "velocity_non_increasing_vjp",
+                "mode": "non_increasing",
+                "proposal": "velocity_difference",
+                "normal_estimator": "vjp",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "velocity_tangent_residual_proxy_legacy",
                 "mode": "tangent",
+                "proposal": "velocity_difference",
+                "normal_estimator": "residual_proxy",
+                "target_relative_correction_norm": 0.05,
+            },
+            {
+                "name": "x0_non_increasing_vjp",
+                "mode": "non_increasing",
                 "proposal": "x0_difference",
-                "normal_estimator": "proxy",
+                "normal_estimator": "vjp",
                 "target_relative_correction_norm": 0.05,
             },
             {
@@ -176,10 +190,10 @@ def make_sampler_config() -> dict[str, object]:
                 "target_relative_correction_norm": 0.05,
             },
             {
-                "name": "random_tangent",
-                "mode": "tangent",
+                "name": "random_non_increasing_vjp",
+                "mode": "non_increasing",
                 "proposal": "random_ambient",
-                "normal_estimator": "proxy",
+                "normal_estimator": "vjp",
                 "target_relative_correction_norm": 0.05,
             },
         ]

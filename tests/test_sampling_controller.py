@@ -51,7 +51,11 @@ def test_native_mode_is_exact_identity_and_restores_scheduler():
 
 def test_sampler_report_is_json_serializable_after_trajectory_capture():
     controller, _, _, _ = run_two_steps(
-        {"mode": "tangent", "capture_trajectory": True}
+        {
+            "mode": "tangent",
+            "normal_estimator": "residual_proxy",
+            "capture_trajectory": True,
+        }
     )
     encoded = json.dumps(controller.report())
     assert '"active": false' in encoded
@@ -74,11 +78,30 @@ def test_tangent_mode_removes_reliability_normal_component():
     controller, _, _, _ = run_two_steps(
         {
             "mode": "tangent",
+            "normal_estimator": "residual_proxy",
             "strength": 1.0,
             "max_relative_correction_norm": None,
         }
     )
     assert abs(controller.logs[1]["post_projection_normal_cosine"][0]) < 1e-6
+    assert controller.logs[1]["subspace_retention"][0] == pytest.approx(1.0)
+    assert controller.logs[1]["constraint_retention"][0] == pytest.approx(0.0, abs=1e-6)
+    assert abs(controller.logs[1]["pre_projection_normal_cosine"][0]) == pytest.approx(1.0)
+
+
+def test_non_increasing_constraint_keeps_consistency_descent_direction():
+    controller, _, _, _ = run_two_steps(
+        {
+            "mode": "non_increasing",
+            "normal_estimator": "residual_proxy",
+            "strength": 1.0,
+            "max_relative_correction_norm": None,
+        }
+    )
+    event = controller.logs[1]
+    assert event["constraint_active"] == [False]
+    assert event["constraint_retention"][0] == pytest.approx(1.0)
+    assert event["directional_derivative_post"][0] <= 0
 
 
 def test_target_norm_matches_orientation_ablation_strength():
@@ -118,14 +141,14 @@ class TinyTransformer(torch.nn.Module):
         return (hidden_states.square(),)
 
 
-def test_exact_hook_computes_x0_consistency_gradient():
+def test_vjp_hook_computes_x0_consistency_gradient():
     scheduler = FakeScheduler()
     transformer = TinyTransformer()
     controller = SamplingRefinementController(
         scheduler,
         {
             "mode": "tangent",
-            "normal_estimator": "exact",
+            "normal_estimator": "vjp",
             "strength": 0.1,
         },
         transformer=transformer,
@@ -137,4 +160,41 @@ def test_exact_hook_computes_x0_consistency_gradient():
         second_prediction = transformer(hidden_states=first, return_dict=False)[0]
         scheduler.step(second_prediction, torch.tensor(500.0), first, return_dict=False)
     assert controller.logs[1]["normal_norm"][0] > 0
-    assert controller.logs[1]["exact_x0_consistency_mse"][0] > 0
+    assert controller.logs[1]["vjp_consistency_objective"][0] > 0
+    previous_x0 = sample - sample.square()
+    current_x0 = first - 0.5 * first.square()
+    error = current_x0 - previous_x0
+    expected_normal = (1 - first) * error / error.numel()
+    assert controller.logs[1]["normal_norm"][0] == pytest.approx(
+        float(expected_normal.norm()), rel=1e-5
+    )
+
+
+class ScaledTransformer(torch.nn.Module):
+    def forward(self, *, hidden_states, return_dict=False, **kwargs):
+        return (3 * hidden_states,)
+
+
+def test_vjp_non_increasing_controller_removes_consistency_ascent():
+    scheduler = FakeScheduler()
+    transformer = ScaledTransformer()
+    controller = SamplingRefinementController(
+        scheduler,
+        {
+            "mode": "non_increasing",
+            "normal_estimator": "vjp",
+            "strength": 1.0,
+            "max_relative_correction_norm": None,
+        },
+        transformer=transformer,
+    )
+    sample = torch.tensor([[[0.5, 0.25]]])
+    with torch.no_grad(), controller:
+        first_prediction = transformer(hidden_states=sample, return_dict=False)[0]
+        first = scheduler.step(first_prediction, torch.tensor(1000.0), sample, return_dict=False)[0]
+        second_prediction = transformer(hidden_states=first, return_dict=False)[0]
+        scheduler.step(second_prediction, torch.tensor(500.0), first, return_dict=False)
+    event = controller.logs[1]
+    assert event["constraint_active"] == [True]
+    assert event["directional_derivative_pre"][0] > 0
+    assert event["directional_derivative_post"][0] == pytest.approx(0.0, abs=1e-6)

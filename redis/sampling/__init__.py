@@ -11,7 +11,9 @@ from .geometry import (
     batched_norm,
     cap_relative_norm,
     match_relative_norm,
+    non_increasing_project,
     orthonormalize,
+    project_onto_basis,
     project_onto_span,
     tangent_project,
 )
@@ -27,7 +29,9 @@ __all__ = [
     "batched_norm",
     "cap_relative_norm",
     "match_relative_norm",
+    "non_increasing_project",
     "orthonormalize",
+    "project_onto_basis",
     "project_onto_span",
     "tangent_project",
 ]

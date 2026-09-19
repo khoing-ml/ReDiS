@@ -45,6 +45,9 @@ for condition_record in conditions:
     active_steps = [step for step in steps if step.get("active")]
     corrections = flattened_step_values(active_steps, "correction_relative_norm")
     retention = flattened_step_values(active_steps, "subspace_retention")
+    constraint_retention = flattened_step_values(active_steps, "constraint_retention")
+    pre_cosines = flattened_step_values(active_steps, "pre_projection_normal_cosine")
+    post_cosines = flattened_step_values(active_steps, "post_projection_normal_cosine")
     row: dict[str, object] = {
         "condition": condition,
         "mode": report["config"]["mode"],
@@ -57,7 +60,12 @@ for condition_record in conditions:
         "mean_x0_consistency_norm": mean(consistency) if consistency else None,
         "max_x0_consistency_norm": max(consistency) if consistency else None,
         "mean_correction_relative_norm": mean(corrections) if corrections else None,
-        "mean_projection_retention": mean(retention) if retention else None,
+        "mean_subspace_retention": mean(retention) if retention else None,
+        "mean_constraint_retention": (
+            mean(constraint_retention) if constraint_retention else None
+        ),
+        "mean_pre_projection_normal_cosine": mean(pre_cosines) if pre_cosines else None,
+        "mean_post_projection_normal_cosine": mean(post_cosines) if post_cosines else None,
     }
     if metrics is not None:
         row.update(
